@@ -38,6 +38,11 @@ RUN pnpm build
 # Build admin frontend
 RUN cd web && pnpm install --frozen-lockfile && pnpm build
 
+# Rewrite SSH git URLs to HTTPS and configure token auth
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+    && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
+    && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+
 # Create directories for data and repos
 RUN mkdir -p /data /repos
 
