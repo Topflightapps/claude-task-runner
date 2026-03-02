@@ -1,0 +1,64 @@
+{
+  "name": "claude-task-runner",
+  "version": "1.0.0",
+  "description": "Automated Claude Code task runner that polls ClickUp and creates GitHub PRs",
+  "type": "module",
+  "packageManager": "pnpm@10.11.0",
+  "scripts": {
+    "preinstall": "npx only-allow pnpm",
+    "dev": "tsx --watch --env-file .env src/index.ts",
+    "dev:admin": "tsx --watch --env-file .env src/index.ts & cd web && pnpm dev & wait",
+    "build": "tsc -p tsconfig.build.json",
+    "start": "node --env-file .env dist/index.js",
+    "setup": "tsx scripts/setup.ts",
+    "type-check": "tsc --noEmit",
+    "lint": "eslint .",
+    "lint:fix": "eslint --fix .",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest",
+    "test:run": "vitest --run",
+    "coverage": "vitest run --coverage",
+    "prepare": "husky"
+  },
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "p-throttle": "^6.2.0",
+    "pino": "^9.6.0",
+    "ws": "^8.18.0",
+    "zod": "^3.24.0"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx}": [
+      "eslint --fix",
+      "prettier --write"
+    ],
+    "*.{json,yml,yaml,md}": [
+      "prettier --write"
+    ]
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.1",
+    "@tsconfig/node22": "^22.0.5",
+    "@types/better-sqlite3": "^7.6.12",
+    "@types/node": "^24.10.2",
+    "@types/ws": "^8.18.0",
+    "@vitest/coverage-v8": "^4.0.15",
+    "@vitest/eslint-plugin": "^1.5.2",
+    "eslint": "^9.39.1",
+    "eslint-plugin-perfectionist": "^4.15.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
+    "prettier": "^3.7.4",
+    "tsx": "^4.21.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.49.0",
+    "vitest": "^4.0.15"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "better-sqlite3",
+      "esbuild"
+    ]
+  }
+}

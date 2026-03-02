@@ -1,0 +1,14 @@
+services:
+  runner:
+    build: .
+    env_file: .env
+    ports:
+      - "3000:3000"
+    volumes:
+      - runner-data:/data
+      - runner-repos:/repos
+    restart: unless-stopped
+
+volumes:
+  runner-data:
+  runner-repos:
