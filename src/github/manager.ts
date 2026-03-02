@@ -10,28 +10,6 @@ import { createChildLogger } from "../logger.js";
 const execFileAsync = promisify(execFile);
 const log = createChildLogger("github");
 
-/**
- * Remove scripts/ralph/ directory and unstage it from git.
- * This is task runner scaffolding that shouldn't be committed to the project.
- */
-export async function removeRalphScaffolding(repoPath: string): Promise<void> {
-  const ralphDir = join(repoPath, "scripts", "ralph");
-  if (!existsSync(ralphDir)) return;
-
-  // Remove from git tracking (if staged/committed on this branch)
-  try {
-    await git(repoPath, "rm", "-rf", "--cached", "scripts/ralph");
-  } catch {
-    // Not tracked — that's fine
-  }
-
-  // Delete from disk
-  const { rmSync } = await import("node:fs");
-  rmSync(ralphDir, { force: true, recursive: true });
-
-  log.info("Removed scripts/ralph/ scaffolding");
-}
-
 export async function commitAll(
   repoPath: string,
   message: string,
@@ -73,6 +51,7 @@ export async function createBranch(
 
 export async function ensureRepo(repoUrl: string): Promise<string> {
   const dir = repoDir(repoUrl);
+  const httpsUrl = toHttpsUrl(repoUrl);
 
   if (existsSync(join(dir, ".git"))) {
     log.info({ dir }, "Repo exists, fetching latest");
@@ -81,10 +60,10 @@ export async function ensureRepo(repoUrl: string): Promise<string> {
     await git(dir, "reset", "--hard", "origin/develop");
     await git(dir, "clean", "-fd");
   } else {
-    log.info({ dir, repoUrl }, "Cloning repo");
+    log.info({ dir, repoUrl: httpsUrl }, "Cloning repo");
     const parentDir = join(dir, "..");
     await execFileAsync("mkdir", ["-p", parentDir]);
-    await git(parentDir, "clone", repoUrl, dir);
+    await git(parentDir, "clone", httpsUrl, dir);
     await git(dir, "checkout", "develop");
   }
 
@@ -133,6 +112,28 @@ export async function pushAndCreatePR(
   return prUrl;
 }
 
+/**
+ * Remove scripts/ralph/ directory and unstage it from git.
+ * This is task runner scaffolding that shouldn't be committed to the project.
+ */
+export async function removeRalphScaffolding(repoPath: string): Promise<void> {
+  const ralphDir = join(repoPath, "scripts", "ralph");
+  if (!existsSync(ralphDir)) return;
+
+  // Remove from git tracking (if staged/committed on this branch)
+  try {
+    await git(repoPath, "rm", "-rf", "--cached", "scripts/ralph");
+  } catch {
+    // Not tracked — that's fine
+  }
+
+  // Delete from disk
+  const { rmSync } = await import("node:fs");
+  rmSync(ralphDir, { force: true, recursive: true });
+
+  log.info("Removed scripts/ralph/ scaffolding");
+}
+
 async function getDirSize(dirPath: string): Promise<null | number> {
   try {
     const result = await execFileAsync("du", ["-sk", dirPath]);
@@ -155,9 +156,20 @@ async function gh(cwd: string, ...args: string[]) {
 
 async function git(cwd: string, ...args: string[]) {
   log.debug({ args, cwd }, "Running git command");
+  const config = getConfig();
   const result = await execFileAsync("git", args, {
     cwd,
-    env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+    env: {
+      ...process.env,
+      GIT_TERMINAL_PROMPT: "0",
+      GIT_ASKPASS: "echo",
+      GIT_CONFIG_COUNT: "1",
+      GIT_CONFIG_KEY_0:
+        "url.https://x-access-token:" +
+        config.GITHUB_TOKEN +
+        "@github.com/.insteadOf",
+      GIT_CONFIG_VALUE_0: "https://github.com/",
+    },
     maxBuffer: 10 * 1024 * 1024,
   });
   return result.stdout.trim();
@@ -168,4 +180,11 @@ function repoDir(repoUrl: string): string {
   const match = /github\.com[/:]([^/]+\/[^/]+?)(?:\.git)?$/.exec(repoUrl);
   if (!match) throw new Error(`Invalid GitHub repo URL: ${repoUrl}`);
   return join(getConfig().WORK_DIR, match[1]);
+}
+
+function toHttpsUrl(repoUrl: string): string {
+  // Convert git@github.com:owner/repo.git → https://github.com/owner/repo.git
+  const sshMatch = /^git@github\.com:(.+)$/.exec(repoUrl);
+  if (sshMatch) return `https://github.com/${sshMatch[1]}`;
+  return repoUrl;
 }
