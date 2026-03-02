@@ -7,8 +7,10 @@ services:
     volumes:
       - runner-data:/data
       - runner-repos:/repos
+      - claude-auth:/root/.claude
     restart: unless-stopped
 
 volumes:
   runner-data:
   runner-repos:
+  claude-auth:

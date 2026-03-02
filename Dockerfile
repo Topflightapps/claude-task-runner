@@ -32,8 +32,11 @@ RUN pnpm install --frozen-lockfile
 # Copy source
 COPY . .
 
-# Build
+# Build backend
 RUN pnpm build
+
+# Build admin frontend
+RUN cd web && pnpm install --frozen-lockfile && pnpm build
 
 # Create directories for data and repos
 RUN mkdir -p /data /repos
@@ -43,4 +46,4 @@ ENV WORK_DIR=/repos
 
 EXPOSE 3000
 
-CMD ["node", "--env-file", ".env", "dist/index.js"]
+CMD ["node", "dist/index.js"]
