@@ -43,12 +43,16 @@ RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
     && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
     && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
 
-# Create directories for data and repos
-RUN mkdir -p /data /repos
+# All persistent data under /data (single Railway volume)
+# /data/db/       — SQLite database
+# /data/repos/    — Cloned git repositories
+# /data/claude/   — Claude CLI auth tokens
+RUN mkdir -p /data/db /data/repos /data/claude
 
-ENV DB_PATH=/data/task-runner.db
-ENV WORK_DIR=/repos
+ENV DB_PATH=/data/db/task-runner.db
+ENV WORK_DIR=/data/repos
 
 EXPOSE 3000
 
-CMD ["node", "dist/index.js"]
+# Symlink Claude auth dir so the CLI finds it at ~/.claude
+CMD ln -sfn /data/claude /root/.claude && exec node dist/index.js
