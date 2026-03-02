@@ -38,21 +38,27 @@ RUN pnpm build
 # Build admin frontend
 RUN cd web && pnpm install --frozen-lockfile && pnpm build
 
-# Rewrite SSH git URLs to HTTPS and configure token auth
-RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
-    && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
-    && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
-
 # All persistent data under /data (single Railway volume)
 # /data/db/       — SQLite database
 # /data/repos/    — Cloned git repositories
 # /data/claude/   — Claude CLI auth tokens
 RUN mkdir -p /data/db /data/repos /data/claude
 
+# Create non-root user (Claude CLI refuses --dangerously-skip-permissions as root)
+RUN useradd -m -s /bin/bash claude \
+    && chown -R claude:claude /app /data
+
+# Rewrite SSH git URLs to HTTPS and configure token auth (as claude user)
+USER claude
+RUN git config --global url."https://github.com/".insteadOf "git@github.com:" \
+    && git config --global url."https://github.com/".insteadOf "ssh://git@github.com/" \
+    && git config --global credential.helper '!f() { echo "username=x-access-token"; echo "password=${GITHUB_TOKEN}"; }; f'
+
 ENV DB_PATH=/data/db/task-runner.db
 ENV WORK_DIR=/data/repos
+ENV HOME=/home/claude
 
 EXPOSE 3000
 
 # Symlink Claude auth dir so the CLI finds it at ~/.claude
-CMD ln -sfn /data/claude /root/.claude && exec node dist/index.js
+CMD ln -sfn /data/claude /home/claude/.claude && exec node dist/index.js
