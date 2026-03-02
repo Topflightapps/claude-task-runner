@@ -1,0 +1,5 @@
+{
+  "enabledPlugins": {
+    "buildwright-plugin@buildwright": true
+  }
+}
