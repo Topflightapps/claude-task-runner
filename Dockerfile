@@ -60,5 +60,8 @@ ENV HOME=/home/claude
 
 EXPOSE 3000
 
-# Symlink Claude auth dir so the CLI finds it at ~/.claude
-CMD ln -sfn /data/claude /home/claude/.claude && exec node dist/index.js
+# Entrypoint runs as root to fix volume permissions, then drops to claude user
+USER root
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+ENTRYPOINT ["/entrypoint.sh"]
