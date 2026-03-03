@@ -59,7 +59,19 @@ export function useWebSocket(token: string | null) {
       } else if (msg.type === "status" || msg.type === "queue") {
         notify();
       } else if (msg.type === "review:output") {
-        // Output events are just log lines — notify for LogViewer but don't bump version
+        const newLines = [
+          ...stateRef.current.lines,
+          {
+            line: "[review] " + msg.line,
+            runId: msg.reviewId,
+            stream: msg.stream,
+            ts: msg.ts,
+          },
+        ];
+        if (newLines.length > MAX_LINES) {
+          newLines.splice(0, newLines.length - MAX_LINES);
+        }
+        stateRef.current = { ...stateRef.current, lines: newLines };
         notify();
       } else if (msg.type === "review:status" || msg.type === "review:queue") {
         stateRef.current = {
