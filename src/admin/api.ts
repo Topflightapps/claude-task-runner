@@ -22,6 +22,7 @@ import {
   reviewOutputBuffer,
   taskEvents,
 } from "../events.js";
+import { cancelAllReviews } from "../review/queue.js";
 import { handleLogin, validateAuth } from "./auth.js";
 
 export function handleAdminApi(
@@ -236,10 +237,11 @@ export function handleAdminApi(
     return;
   }
 
-  // DELETE /api/reviews/completed
+  // DELETE /api/reviews/completed — also kills running reviews and clears queue
   if (path === "/api/reviews/completed" && method === "DELETE") {
-    const count = deleteCompletedReviews();
-    json(res, 200, { deleted: count });
+    const cancelled = cancelAllReviews();
+    const deleted = deleteCompletedReviews();
+    json(res, 200, { cancelled, deleted });
     return;
   }
 

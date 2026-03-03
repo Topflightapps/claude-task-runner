@@ -1,5 +1,5 @@
-import { getReviewRun, insertReviewRun } from "../db.js";
-import { taskEvents } from "../events.js";
+import { getReviewRun, insertReviewRun, updateReviewRun } from "../db.js";
+import { activeReviewProcesses, taskEvents } from "../events.js";
 import { createChildLogger } from "../logger.js";
 import { executeReview } from "./executor.js";
 
@@ -15,6 +15,48 @@ interface ReviewQueueItem {
   pr_title: string;
   pr_url: string;
   repo_full_name: string;
+}
+
+/**
+ * Kill all running review processes, clear the queue, and mark
+ * any in-progress/queued reviews as failed.
+ */
+export function cancelAllReviews(): number {
+  // Clear queued items
+  const cancelled = queue.splice(0, queue.length);
+
+  // Mark queued reviews as cancelled in DB
+  for (const id of cancelled) {
+    updateReviewRun(id, {
+      error_message: "Cancelled by admin",
+      status: "failed",
+    });
+    taskEvents.emit("review:status", { reviewId: id, status: "failed" });
+  }
+
+  // Kill the currently running review process
+  if (runningReviewId !== null) {
+    const proc = activeReviewProcesses.get(runningReviewId);
+    if (proc) {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        if (!proc.killed) proc.kill("SIGKILL");
+      }, 5_000);
+    }
+    updateReviewRun(runningReviewId, {
+      error_message: "Cancelled by admin",
+      status: "failed",
+    });
+    taskEvents.emit("review:status", {
+      reviewId: runningReviewId,
+      status: "failed",
+    });
+    cancelled.push(runningReviewId);
+  }
+
+  log.info({ cancelled: cancelled.length }, "All reviews cancelled");
+  emitQueueState();
+  return cancelled.length;
 }
 
 export function enqueueReview(item: ReviewQueueItem): number {
@@ -48,16 +90,17 @@ async function drainReviewQueue(): Promise<void> {
     const reviewId = queue.shift();
     if (reviewId === undefined) break;
 
+    // Skip if already cancelled
+    const review = getReviewRun(reviewId);
+    if (!review || review.status === "failed") {
+      log.warn({ reviewId }, "Review already cancelled or missing, skipping");
+      continue;
+    }
+
     runningReviewId = reviewId;
     emitQueueState();
 
     try {
-      const review = getReviewRun(reviewId);
-      if (!review) {
-        log.warn({ reviewId }, "Review run not found in DB, skipping");
-        continue;
-      }
-
       await executeReview(
         reviewId,
         review.repo_full_name,
