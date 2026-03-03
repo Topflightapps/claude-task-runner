@@ -59,7 +59,7 @@ The fastest way to get started is a one-click deploy to Railway:
 
 ### Adding a volume
 
-Railway volumes persist data across redeploys. You **must** attach one:
+Railway volumes persist data across redeploys. You **must** attach one. Template should include this already, but if you need to attach one manually:
 
 1. Open your service in the Railway dashboard
 2. Go to **Settings → Volumes**
@@ -85,28 +85,28 @@ All configuration is via environment variables, validated at startup with Zod. T
 | ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `CLICKUP_API_TOKEN`      | ClickUp personal API token (`pk_...`). Get it from ClickUp → Settings → Apps.                                                                                               |
 | `CLICKUP_TEAM_ID`        | Your ClickUp team/workspace ID. Found in the URL: `app.clickup.com/{team_id}/...`                                                                                           |
-| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user. Assignment to this user triggers task pickup. Find it via the ClickUp API or `pnpm setup`.                                           |
-| `CLICKUP_REPO_FIELD_ID`  | ID of your "GitHub Repo" custom field (URL type). The runner reads this field to know which repo to clone. Find it via the ClickUp API or `pnpm setup`.                     |
+| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user. Assignment to this user triggers task pickup. Find it via the ClickUp API or `pnpm run setup`.                                       |
+| `CLICKUP_REPO_FIELD_ID`  | ID of your "GitHub Repo" custom field (URL type). The runner reads this field to know which repo to clone. Find it via the ClickUp API or `pnpm run setup`.                 |
 | `WEBHOOK_SECRET`         | Shared secret for verifying ClickUp webhook signatures (HMAC-SHA256). Generate one with `openssl rand -hex 32`. Must match what you register with ClickUp.                  |
 | `GITHUB_TOKEN`           | GitHub personal access token with `repo` scope. Used for cloning, pushing, and creating PRs. Create at github.com → Settings → Developer settings → Personal access tokens. |
 
 ### Optional
 
-| Variable                | Default                         | Description                                                                                                                                                                    |
-| ----------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ANTHROPIC_API_KEY`     | —                               | Anthropic API key for pay-per-use Claude. Not needed if you use `claude login` with a Max/Pro subscription. Get one at [console.anthropic.com](https://console.anthropic.com). |
-| `WEBHOOK_PORT`          | `3000`                          | Port for the webhook HTTP server. Railway sets `PORT` automatically — the Dockerfile exposes 3000.                                                                             |
-| `WORK_DIR`              | `/tmp/claude-task-runner/repos` | Directory where repos are cloned. On Railway, this is overridden to `/data/repos` via the Dockerfile.                                                                          |
-| `DB_PATH`               | `./data/task-runner.db`         | SQLite database file path. On Railway, this is overridden to `/data/db/task-runner.db` via the Dockerfile.                                                                     |
-| `CLAUDE_MAX_TURNS`      | `50`                            | Max agentic turns per Claude Code run. Higher = more thorough but slower/costlier.                                                                                             |
-| `FIGMA_MCP_TOKEN`       | —                               | Figma MCP token for design-to-code tasks. Include Figma URLs in your ClickUp task description and the runner auto-detects them.                                                |
-| `GITHUB_PR_ASSIGNEE`    | —                               | GitHub username to auto-assign created PRs to.                                                                                                                                 |
-| `GITHUB_USERNAME`       | —                               | Your GitHub username. Enables the PR review pipeline when set alongside `GITHUB_WEBHOOK_SECRET`.                                                                               |
-| `GITHUB_WEBHOOK_SECRET` | —                               | Secret for GitHub webhook signature verification. Enables automated PR reviews when set alongside `GITHUB_USERNAME`.                                                           |
-| `REVIEW_TIMEOUT_MS`     | `900000` (15 min)               | Timeout for the PR review phase.                                                                                                                                               |
-| `SLACK_BOT_TOKEN`       | —                               | Slack bot token (`xoxb-...`) for DM notifications when tasks complete or reviews are ready.                                                                                    |
-| `SLACK_USER_ID`         | —                               | Your Slack user ID for receiving DM notifications.                                                                                                                             |
-| `ADMIN_PASSWORD`        | —                               | Password to protect the admin dashboard. Leave empty to disable the dashboard.                                                                                                 |
+| Variable                | Default                   | Description                                                                                                                                                                    |
+| ----------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ANTHROPIC_API_KEY`     | —                         | Anthropic API key for pay-per-use Claude. Not needed if you use `claude login` with a Max/Pro subscription. Get one at [console.anthropic.com](https://console.anthropic.com). |
+| `WEBHOOK_PORT`          | `3000`                    | Port for the webhook HTTP server. Railway sets `PORT` automatically — the Dockerfile exposes 3000.                                                                             |
+| `WORK_DIR`              | `/data/repos`             | Directory where repos are cloned. On Railway, this is overridden to `/data/repos` via the Dockerfile.                                                                          |
+| `DB_PATH`               | `/data/db/task-runner.db` | SQLite database file path. On Railway, this is overridden to `/data/db/task-runner.db` via the Dockerfile.                                                                     |
+| `CLAUDE_MAX_TURNS`      | `10`                      | Max agentic turns per Claude Code run. Higher = more thorough but slower/costlier.                                                                                             |
+| `FIGMA_MCP_TOKEN`       | —                         | Figma MCP token for design-to-code tasks. Include Figma URLs in your ClickUp task description and the runner auto-detects them.                                                |
+| `GITHUB_PR_ASSIGNEE`    | —                         | GitHub username to auto-assign created PRs to.                                                                                                                                 |
+| `GITHUB_USERNAME`       | —                         | Your GitHub username. Enables the PR review pipeline when set alongside `GITHUB_WEBHOOK_SECRET`.                                                                               |
+| `GITHUB_WEBHOOK_SECRET` | —                         | Secret for GitHub webhook signature verification. Enables automated PR reviews when set alongside `GITHUB_USERNAME`.                                                           |
+| `REVIEW_TIMEOUT_MS`     | `900000` (15 min)         | Timeout for the PR review phase.                                                                                                                                               |
+| `SLACK_BOT_TOKEN`       | —                         | Slack bot token (`xoxb-...`) for DM notifications when tasks complete or reviews are ready.                                                                                    |
+| `SLACK_USER_ID`         | —                         | Your Slack user ID for receiving DM notifications.                                                                                                                             |
+| `ADMIN_PASSWORD`        | —                         | Password to protect the admin dashboard. Leave empty to disable the dashboard.                                                                                                 |
 
 ---
 
@@ -116,7 +116,7 @@ All configuration is via environment variables, validated at startup with Zod. T
 
 Create a dedicated ClickUp user (e.g., "Claude") that will act as the trigger. When you assign a task to this user, the webhook fires and the runner picks it up.
 
-### 2. Create the "GitHub Repo" Custom Field
+### 2. Create the "GitHub Repo" Custom Field (if one doesn't already exist)
 
 In your ClickUp space, create a custom field:
 
@@ -137,7 +137,7 @@ POST https://api.clickup.com/api/v2/team/{team_id}/webhook
 }
 ```
 
-Or run `pnpm setup` locally to auto-register it.
+Or run `pnpm run setup` locally to auto-register it.
 
 ### 4. Task Requirements
 
@@ -233,7 +233,7 @@ cd claude-task-runner
 pnpm install
 
 # Run the interactive setup to generate your .env file
-pnpm setup
+pnpm run setup
 
 # Start the runner (dev mode with hot reload)
 pnpm dev
@@ -519,7 +519,7 @@ pnpm coverage
 
 ### "Config not loaded" error
 
-Make sure all required environment variables are set. Run `pnpm setup` locally to generate a `.env` file.
+Make sure all required environment variables are set. Run `pnpm run setup` locally to generate a `.env` file.
 
 ### ClickUp API 401
 
