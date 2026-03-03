@@ -25,13 +25,11 @@ export async function runClaudeReview(
 ): Promise<ReviewResult> {
   const config = getConfig();
 
-  const prompt = `You are reviewing a pull request. Here is the diff:
+  // The prompt instruction goes via -p; the diff is piped through stdin.
+  // This avoids E2BIG when the diff exceeds the OS arg size limit.
+  const prompt = `The user's stdin contains a pull request diff. Review it.
 
-\`\`\`diff
-${diff}
-\`\`\`
-
-Read the relevant source files in this repository for context. Then analyze this diff and provide a code review.
+Read the relevant source files in this repository for context. Then analyze the diff and provide a code review.
 
 Output ONLY valid JSON in this exact format (no markdown, no code fences):
 {
@@ -69,7 +67,13 @@ If the code looks good with no substantive issues, return an empty comments arra
 
   log.info({ repoPath, reviewId }, "Starting Claude Code review");
 
-  return spawnReviewProcess(repoPath, args, config.REVIEW_TIMEOUT_MS, reviewId);
+  return spawnReviewProcess(
+    repoPath,
+    args,
+    diff,
+    config.REVIEW_TIMEOUT_MS,
+    reviewId,
+  );
 }
 
 function parseReviewOutput(text: string): ClaudeReviewOutput | null {
@@ -92,6 +96,7 @@ function parseReviewOutput(text: string): ClaudeReviewOutput | null {
 function spawnReviewProcess(
   cwd: string,
   args: string[],
+  stdinData: string,
   timeoutMs: number,
   reviewId: number,
 ): Promise<ReviewResult> {
@@ -106,6 +111,7 @@ function spawnReviewProcess(
       stdio: ["pipe", "pipe", "pipe"],
     });
 
+    child.stdin.write(stdinData);
     child.stdin.end();
     activeReviewProcesses.set(reviewId, child);
 

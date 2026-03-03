@@ -58,11 +58,10 @@ export function useWebSocket(token: string | null) {
         notify();
       } else if (msg.type === "status" || msg.type === "queue") {
         notify();
-      } else if (
-        msg.type === "review:status" ||
-        msg.type === "review:queue" ||
-        msg.type === "review:output"
-      ) {
+      } else if (msg.type === "review:output") {
+        // Output events are just log lines — notify for LogViewer but don't bump version
+        notify();
+      } else if (msg.type === "review:status" || msg.type === "review:queue") {
         stateRef.current = {
           ...stateRef.current,
           reviewVersion: stateRef.current.reviewVersion + 1,
