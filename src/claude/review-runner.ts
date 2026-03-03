@@ -38,6 +38,11 @@ export async function runClaudeReview(
     prBaseBranch +
     "...HEAD` to see what changed. " +
     "Read the relevant source files for context.\n\n" +
+    'CRITICAL: The "line" in each comment MUST be a line number that appears in the diff output. ' +
+    "GitHub's review API only accepts comments on lines that are part of the diff hunks " +
+    "(added/removed/modified lines and their surrounding context lines shown in the diff). " +
+    "Use the line numbers from the RIGHT side of the diff (the new file version). " +
+    "If you want to comment on code that is NOT in the diff, include it in the summary instead.\n\n" +
     "Provide a code review as ONLY valid JSON (no markdown, no code fences):\n" +
     "{\n" +
     '  "summary": "Brief overall assessment of the PR",\n' +
