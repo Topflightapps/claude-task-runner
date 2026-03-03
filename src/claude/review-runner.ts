@@ -1,4 +1,7 @@
 import { spawn } from "node:child_process";
+import { copyFileSync, existsSync, readdirSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 import type { ClaudeReviewOutput } from "../github/types.js";
 
@@ -65,6 +68,7 @@ If the code looks good with no substantive issues, return an empty comments arra
     "10",
   ];
 
+  ensureClaudeConfig();
   log.info({ repoPath, reviewId }, "Starting Claude Code review");
 
   return spawnReviewProcess(
@@ -74,6 +78,34 @@ If the code looks good with no substantive issues, return an empty comments arra
     config.REVIEW_TIMEOUT_MS,
     reviewId,
   );
+}
+
+/**
+ * Restore .claude.json from backup if missing. Concurrent Claude processes
+ * (task runner + review runner) can corrupt/delete this file.
+ */
+function ensureClaudeConfig(): void {
+  const home = homedir();
+  const configPath = join(home, ".claude.json");
+  if (existsSync(configPath)) return;
+
+  const backupDir = join(home, ".claude", "backups");
+  if (!existsSync(backupDir)) return;
+
+  try {
+    const backups = readdirSync(backupDir)
+      .filter((f) => f.startsWith(".claude.json.backup."))
+      .sort()
+      .reverse();
+
+    if (backups.length > 0) {
+      const latest = join(backupDir, backups[0]);
+      copyFileSync(latest, configPath);
+      log.info({ from: latest }, "Restored .claude.json from backup");
+    }
+  } catch (err) {
+    log.warn({ error: err }, "Failed to restore .claude.json from backup");
+  }
 }
 
 function parseReviewOutput(text: string): ClaudeReviewOutput | null {
