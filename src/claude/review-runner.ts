@@ -12,6 +12,7 @@ import {
   taskEvents,
 } from "../events.js";
 import { createChildLogger } from "../logger.js";
+import { extractStreamLine } from "./runner.js";
 
 const log = createChildLogger("review-runner");
 
@@ -181,14 +182,19 @@ function spawnReviewProcess(
             resultText = event.result;
           }
 
+          const display = extractStreamLine(event);
           const evtType = typeof event.type === "string" ? event.type : "event";
-          const line = "[" + evtType + "]";
-          appendReviewOutput(reviewId, line);
-          taskEvents.emit("review:output", {
-            line,
-            reviewId,
-            stream: "stdout",
-          });
+          const evtSub =
+            typeof event.subtype === "string" ? `:${event.subtype}` : "";
+          const line = display ?? `[${evtType}${evtSub}]`;
+          for (const l of line.split("\n").filter(Boolean)) {
+            appendReviewOutput(reviewId, l);
+            taskEvents.emit("review:output", {
+              line: l,
+              reviewId,
+              stream: "stdout",
+            });
+          }
         } catch {
           if (trimmed) {
             appendReviewOutput(reviewId, trimmed);

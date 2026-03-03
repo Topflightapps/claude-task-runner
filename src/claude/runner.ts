@@ -185,12 +185,16 @@ export async function runRalphLoop(
   });
 }
 
-function extractStreamLine(event: Record<string, unknown>): null | string {
+export function extractStreamLine(
+  event: Record<string, unknown>,
+): null | string {
   const type = typeof event.type === "string" ? event.type : "";
 
   // assistant — extract text content from message
   if (type === "assistant") {
-    const msg = event.message as undefined | { content?: { text?: string; type?: string; name?: string }[] };
+    const msg = event.message as
+      | undefined
+      | { content?: { text?: string; type?: string; name?: string }[] };
     if (msg?.content) {
       const parts: string[] = [];
       for (const block of msg.content) {
@@ -257,7 +261,10 @@ function spawnClaudeProcess(
     child.stdin.end();
 
     child.on("spawn", () => {
-      log.info({ pid: child.pid, runId }, "Claude process spawn event confirmed");
+      log.info(
+        { pid: child.pid, runId },
+        "Claude process spawn event confirmed",
+      );
     });
 
     if (runId !== undefined) {
@@ -297,8 +304,10 @@ function spawnClaudeProcess(
           const display = extractStreamLine(event);
           if (runId !== undefined) {
             // Always emit something — either the parsed display or the event type
-            const evtType = typeof event.type === "string" ? event.type : "event";
-            const evtSub = typeof event.subtype === "string" ? `:${event.subtype}` : "";
+            const evtType =
+              typeof event.type === "string" ? event.type : "event";
+            const evtSub =
+              typeof event.subtype === "string" ? `:${event.subtype}` : "";
             const line = display ?? `[${evtType}${evtSub}]`;
             for (const l of line.split("\n").filter(Boolean)) {
               log.debug({ line: l.slice(0, 500) }, "Claude output");
@@ -311,7 +320,11 @@ function spawnClaudeProcess(
           if (trimmed && runId !== undefined) {
             log.debug({ line: trimmed.slice(0, 500) }, "Claude output");
             appendOutput(runId, trimmed);
-            taskEvents.emit("output", { line: trimmed, runId, stream: "stdout" });
+            taskEvents.emit("output", {
+              line: trimmed,
+              runId,
+              stream: "stdout",
+            });
           }
         }
       }
