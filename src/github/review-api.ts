@@ -43,7 +43,7 @@ export async function createPendingReview(
         path: c.path,
         side: c.side ?? "RIGHT",
       })),
-      event: "PENDING",
+      // Omit "event" field — that creates a PENDING (draft) review
     });
 
     const stdout = await ghApiPost(endpoint, body);
@@ -61,7 +61,7 @@ export async function createPendingReview(
   }
 
   // Fallback: create empty pending review, then add comments one by one
-  const emptyBody = JSON.stringify({ body: "", event: "PENDING" });
+  const emptyBody = JSON.stringify({ body: "" });
   const stdout = await ghApiPost(endpoint, emptyBody);
   const response = JSON.parse(stdout) as PendingReviewResponse;
   const reviewId = response.id;
