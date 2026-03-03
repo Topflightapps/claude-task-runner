@@ -70,6 +70,7 @@ Railway volumes persist data across redeploys. You **must** attach one:
 5. Click **Create**
 
 This single volume stores:
+
 - `/data/db/` — SQLite database (run history, crash recovery)
 - `/data/repos/` — Cloned git repositories
 - `/data/claude/` — Claude CLI auth tokens (persists `claude login`)
@@ -82,44 +83,45 @@ All configuration is via environment variables, validated at startup with Zod. T
 
 ### Required
 
-| Variable | Description |
-| --- | --- |
-| `CLICKUP_API_TOKEN` | ClickUp personal API token (`pk_...`). Get it from ClickUp → Settings → Apps. |
-| `CLICKUP_TEAM_ID` | Your ClickUp team/workspace ID. Found in the URL: `app.clickup.com/{team_id}/...` |
-| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user. Assignment to this user triggers task pickup. Find it via the ClickUp API or `pnpm setup`. |
-| `CLICKUP_REPO_FIELD_ID` | ID of your "GitHub Repo" custom field (URL type). The runner reads this field to know which repo to clone. Find it via the ClickUp API or `pnpm setup`. |
-| `WEBHOOK_SECRET` | Shared secret for verifying ClickUp webhook signatures (HMAC-SHA256). Generate one with `openssl rand -hex 32`. Must match what you register with ClickUp. |
-| `GITHUB_TOKEN` | GitHub personal access token with `repo` scope. Used for cloning, pushing, and creating PRs. Create at github.com → Settings → Developer settings → Personal access tokens. |
+| Variable                 | Description                                                                                                                                                                 |
+| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `CLICKUP_API_TOKEN`      | ClickUp personal API token (`pk_...`). Get it from ClickUp → Settings → Apps.                                                                                               |
+| `CLICKUP_TEAM_ID`        | Your ClickUp team/workspace ID. Found in the URL: `app.clickup.com/{team_id}/...`                                                                                           |
+| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user. Assignment to this user triggers task pickup. Find it via the ClickUp API or `pnpm setup`.                                           |
+| `CLICKUP_REPO_FIELD_ID`  | ID of your "GitHub Repo" custom field (URL type). The runner reads this field to know which repo to clone. Find it via the ClickUp API or `pnpm setup`.                     |
+| `WEBHOOK_SECRET`         | Shared secret for verifying ClickUp webhook signatures (HMAC-SHA256). Generate one with `openssl rand -hex 32`. Must match what you register with ClickUp.                  |
+| `GITHUB_TOKEN`           | GitHub personal access token with `repo` scope. Used for cloning, pushing, and creating PRs. Create at github.com → Settings → Developer settings → Personal access tokens. |
 
 ### Optional
 
-| Variable | Default | Description |
-| --- | --- | --- |
-| `ANTHROPIC_API_KEY` | — | Anthropic API key for pay-per-use Claude. Not needed if you use `claude login` with a Max/Pro subscription. Get one at [console.anthropic.com](https://console.anthropic.com). |
-| `WEBHOOK_PORT` | `3000` | Port for the webhook HTTP server. Railway sets `PORT` automatically — the Dockerfile exposes 3000. |
-| `WORK_DIR` | `/tmp/claude-task-runner/repos` | Directory where repos are cloned. On Railway, this is overridden to `/data/repos` via the Dockerfile. |
-| `DB_PATH` | `./data/task-runner.db` | SQLite database file path. On Railway, this is overridden to `/data/db/task-runner.db` via the Dockerfile. |
-| `CLAUDE_MAX_TURNS` | `50` | Max agentic turns per Claude Code run. Higher = more thorough but slower/costlier. |
-| `FIGMA_MCP_TOKEN` | — | Figma MCP token for design-to-code tasks. Include Figma URLs in your ClickUp task description and the runner auto-detects them. |
-| `GITHUB_PR_ASSIGNEE` | — | GitHub username to auto-assign created PRs to. |
-| `GITHUB_USERNAME` | — | Your GitHub username. Enables the PR review pipeline when set alongside `GITHUB_WEBHOOK_SECRET`. |
-| `GITHUB_WEBHOOK_SECRET` | — | Secret for GitHub webhook signature verification. Enables automated PR reviews when set alongside `GITHUB_USERNAME`. |
-| `REVIEW_TIMEOUT_MS` | `900000` (15 min) | Timeout for the PR review phase. |
-| `SLACK_BOT_TOKEN` | — | Slack bot token (`xoxb-...`) for DM notifications when tasks complete or reviews are ready. |
-| `SLACK_USER_ID` | — | Your Slack user ID for receiving DM notifications. |
-| `ADMIN_PASSWORD` | — | Password to protect the admin dashboard. Leave empty to disable the dashboard. |
+| Variable                | Default                         | Description                                                                                                                                                                    |
+| ----------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `ANTHROPIC_API_KEY`     | —                               | Anthropic API key for pay-per-use Claude. Not needed if you use `claude login` with a Max/Pro subscription. Get one at [console.anthropic.com](https://console.anthropic.com). |
+| `WEBHOOK_PORT`          | `3000`                          | Port for the webhook HTTP server. Railway sets `PORT` automatically — the Dockerfile exposes 3000.                                                                             |
+| `WORK_DIR`              | `/tmp/claude-task-runner/repos` | Directory where repos are cloned. On Railway, this is overridden to `/data/repos` via the Dockerfile.                                                                          |
+| `DB_PATH`               | `./data/task-runner.db`         | SQLite database file path. On Railway, this is overridden to `/data/db/task-runner.db` via the Dockerfile.                                                                     |
+| `CLAUDE_MAX_TURNS`      | `50`                            | Max agentic turns per Claude Code run. Higher = more thorough but slower/costlier.                                                                                             |
+| `FIGMA_MCP_TOKEN`       | —                               | Figma MCP token for design-to-code tasks. Include Figma URLs in your ClickUp task description and the runner auto-detects them.                                                |
+| `GITHUB_PR_ASSIGNEE`    | —                               | GitHub username to auto-assign created PRs to.                                                                                                                                 |
+| `GITHUB_USERNAME`       | —                               | Your GitHub username. Enables the PR review pipeline when set alongside `GITHUB_WEBHOOK_SECRET`.                                                                               |
+| `GITHUB_WEBHOOK_SECRET` | —                               | Secret for GitHub webhook signature verification. Enables automated PR reviews when set alongside `GITHUB_USERNAME`.                                                           |
+| `REVIEW_TIMEOUT_MS`     | `900000` (15 min)               | Timeout for the PR review phase.                                                                                                                                               |
+| `SLACK_BOT_TOKEN`       | —                               | Slack bot token (`xoxb-...`) for DM notifications when tasks complete or reviews are ready.                                                                                    |
+| `SLACK_USER_ID`         | —                               | Your Slack user ID for receiving DM notifications.                                                                                                                             |
+| `ADMIN_PASSWORD`        | —                               | Password to protect the admin dashboard. Leave empty to disable the dashboard.                                                                                                 |
 
 ---
 
 ## ClickUp Setup
 
-### 1. Create a "Claude" User
+### 1. Create a "Claude" User (or use your existing user)
 
 Create a dedicated ClickUp user (e.g., "Claude") that will act as the trigger. When you assign a task to this user, the webhook fires and the runner picks it up.
 
 ### 2. Create the "GitHub Repo" Custom Field
 
 In your ClickUp space, create a custom field:
+
 - **Name:** "GitHub Repo"
 - **Type:** URL
 - **Value:** Full GitHub repo URL (e.g., `https://github.com/yourorg/your-next-app`)
@@ -142,6 +144,7 @@ Or run `pnpm setup` locally to auto-register it.
 ### 4. Task Requirements
 
 For the runner to pick up a task:
+
 - **Assigned** to the "Claude" user (matching `CLICKUP_CLAUDE_USER_ID`)
 - Has a valid **"GitHub Repo"** URL in the custom field
 - **Not** already processed (tracked in SQLite)
@@ -151,6 +154,7 @@ Tasks are processed one at a time. Concurrent webhooks are queued.
 ### 5. Task Content Tips
 
 For best results:
+
 - Clear, descriptive **task name** (becomes the PR title)
 - Detailed **description** in markdown (Claude's primary instruction)
 - **Checklists** for acceptance criteria
@@ -186,7 +190,7 @@ If you have a Claude Max or Pro subscription and want to use `claude login` inst
    railway link
 
    # SSH into the running service
-   railway shell
+   railway ssh
    ```
 
 3. **Inside the Railway shell, run:**
@@ -242,10 +246,13 @@ pnpm dev
 The interactive setup script walks you through generating a `.env` file:
 
 ```bash
-pnpm setup
+pnpm run setup
 ```
 
+NOTE: ^ `pnpm setup` will run pnpm's setup script, not ours. Use `pnpm run setup`.
+
 It will:
+
 1. Prompt for your **ClickUp API token**
 2. Fetch your ClickUp teams and let you pick one
 3. List team members so you can select the "Claude" user
@@ -289,8 +296,8 @@ Or set `ANTHROPIC_API_KEY` in your `.env` file.
 
 ### Persistent volumes
 
-| Volume | Mount | Purpose |
-| --- | --- | --- |
+| Volume        | Mount   | Purpose                                           |
+| ------------- | ------- | ------------------------------------------------- |
 | `runner-data` | `/data` | SQLite database, cloned repos, Claude auth tokens |
 
 ### Commands
@@ -339,12 +346,12 @@ The loop exits when all stories pass or max iterations are reached. Timeout: 60 
 
 The Ralph loop files live in `scripts/ralph/` and are copied into each target repo at runtime:
 
-| File | Purpose |
-| --- | --- |
-| `ralph.sh` | Bash loop that spawns fresh Claude instances per iteration |
-| `CLAUDE.md` | Instructions piped to each Claude instance via stdin |
-| `prd.json` | Generated by Phase 1 — structured user stories |
-| `progress.txt` | Cross-iteration memory — learnings, patterns, gotchas |
+| File           | Purpose                                                    |
+| -------------- | ---------------------------------------------------------- |
+| `ralph.sh`     | Bash loop that spawns fresh Claude instances per iteration |
+| `CLAUDE.md`    | Instructions piped to each Claude instance via stdin       |
+| `prd.json`     | Generated by Phase 1 — structured user stories             |
+| `progress.txt` | Cross-iteration memory — learnings, patterns, gotchas      |
 
 **Key design principle:** Each Ralph iteration gets a fresh context window. Memory between iterations is maintained only through git commits, `progress.txt`, and `prd.json`.
 
@@ -406,15 +413,15 @@ The prompt builder (`src/clickup/prompt-builder.ts`) generates detailed prompts 
 
 ### Error Handling
 
-| Scenario | Behavior |
-| --- | --- |
+| Scenario              | Behavior                                                      |
+| --------------------- | ------------------------------------------------------------- |
 | Process crash/restart | Non-terminal DB rows marked `failed` with "Process restarted" |
-| Kickoff timeout | 10-minute timeout. Task marked `failed`. |
-| Ralph loop timeout | 60-minute timeout. Task marked `failed`. |
-| Missing repo URL | Task skipped, comment posted to ClickUp |
-| ClickUp API errors | Rate-limited to 90 req/min via `p-throttle` |
-| Duplicate tasks | DB check prevents re-processing |
-| Any unhandled error | Error posted as ClickUp comment, task marked `failed` |
+| Kickoff timeout       | 10-minute timeout. Task marked `failed`.                      |
+| Ralph loop timeout    | 60-minute timeout. Task marked `failed`.                      |
+| Missing repo URL      | Task skipped, comment posted to ClickUp                       |
+| ClickUp API errors    | Rate-limited to 90 req/min via `p-throttle`                   |
+| Duplicate tasks       | DB check prevents re-processing                               |
+| Any unhandled error   | Error posted as ClickUp comment, task marked `failed`         |
 
 ### MCP Integrations
 
@@ -441,21 +448,21 @@ Access it at your service URL (e.g., `https://your-app.up.railway.app/`). Protec
 
 ### Scripts
 
-| Command | Description |
-| --- | --- |
-| `pnpm dev` | Start with hot reload (tsx --watch), loads .env |
-| `pnpm dev:admin` | Run both backend and web frontend in parallel |
-| `pnpm build` | Compile TypeScript to dist/ |
-| `pnpm start` | Run compiled output (production) |
-| `pnpm setup` | Interactive .env file generator |
-| `pnpm type-check` | TypeScript type checking (no emit) |
-| `pnpm lint` | Run ESLint |
-| `pnpm lint:fix` | Run ESLint with auto-fix |
-| `pnpm format` | Format all files with Prettier |
-| `pnpm format:check` | Check formatting without writing |
-| `pnpm test` | Run tests in watch mode (Vitest) |
-| `pnpm test:run` | Run tests once |
-| `pnpm coverage` | Run tests with coverage report |
+| Command             | Description                                     |
+| ------------------- | ----------------------------------------------- |
+| `pnpm dev`          | Start with hot reload (tsx --watch), loads .env |
+| `pnpm dev:admin`    | Run both backend and web frontend in parallel   |
+| `pnpm build`        | Compile TypeScript to dist/                     |
+| `pnpm start`        | Run compiled output (production)                |
+| `pnpm setup`        | Interactive .env file generator                 |
+| `pnpm type-check`   | TypeScript type checking (no emit)              |
+| `pnpm lint`         | Run ESLint                                      |
+| `pnpm lint:fix`     | Run ESLint with auto-fix                        |
+| `pnpm format`       | Format all files with Prettier                  |
+| `pnpm format:check` | Check formatting without writing                |
+| `pnpm test`         | Run tests in watch mode (Vitest)                |
+| `pnpm test:run`     | Run tests once                                  |
+| `pnpm coverage`     | Run tests with coverage report                  |
 
 ### Tooling
 
@@ -469,20 +476,20 @@ Access it at your service URL (e.g., `https://your-app.up.railway.app/`). Protec
 
 ### Dependencies
 
-| Package | Purpose |
-| --- | --- |
+| Package          | Purpose                                             |
+| ---------------- | --------------------------------------------------- |
 | `better-sqlite3` | SQLite database for run tracking and crash recovery |
-| `p-throttle` | Rate limiting for ClickUp API calls (90 req/min) |
-| `pino` | Structured JSON logging |
-| `ws` | WebSocket for real-time admin updates |
-| `zod` | Environment variable validation |
+| `p-throttle`     | Rate limiting for ClickUp API calls (90 req/min)    |
+| `pino`           | Structured JSON logging                             |
+| `ws`             | WebSocket for real-time admin updates               |
+| `zod`            | Environment variable validation                     |
 
 External CLIs (pre-installed in Docker/Railway):
 
-| CLI | Purpose |
-| --- | --- |
-| `git` | Repository operations |
-| `gh` | GitHub PR creation |
+| CLI      | Purpose                        |
+| -------- | ------------------------------ |
+| `git`    | Repository operations          |
+| `gh`     | GitHub PR creation             |
 | `claude` | Claude Code headless execution |
 
 ---
@@ -513,12 +520,15 @@ pnpm coverage
 ## Troubleshooting
 
 ### "Config not loaded" error
+
 Make sure all required environment variables are set. Run `pnpm setup` locally to generate a `.env` file.
 
 ### ClickUp API 401
+
 Your `CLICKUP_API_TOKEN` is invalid or expired. Generate a new one from ClickUp → Settings → Apps.
 
 ### No tasks being picked up
+
 - Task is assigned to the correct Claude user (`CLICKUP_CLAUDE_USER_ID`)
 - Webhook is registered and pointing to the correct URL
 - `WEBHOOK_SECRET` matches the registered secret
@@ -526,22 +536,27 @@ Your `CLICKUP_API_TOKEN` is invalid or expired. Generate a new one from ClickUp 
 - Task hasn't already been processed (check admin dashboard or SQLite DB)
 
 ### Kickoff fails (Phase 1)
+
 - Check logs for Claude's output
 - Verify `ANTHROPIC_API_KEY` is valid (or `claude login` was successful)
 - Ensure the ClickUp task has enough detail
 
 ### Ralph loop fails or times out (Phase 2)
+
 - Check `scripts/ralph/progress.txt` in the cloned repo
 - Check `scripts/ralph/prd.json` for story status
 - Stories may be too large — the kickoff should split them smaller
 
 ### gh CLI errors
+
 The `GITHUB_TOKEN` needs `repo` scope. The entrypoint auto-authenticates `gh` with this token.
 
 ### Railway: Claude login tokens lost after redeploy
+
 Make sure you have a volume mounted at `/data`. The entrypoint symlinks `/home/claude/.claude` → `/data/claude/` so tokens persist.
 
 ### Logs
+
 Structured JSON via Pino. Key fields: `module`, `taskId`, `runId`, `branchName`, `prUrl`.
 
 ```bash
