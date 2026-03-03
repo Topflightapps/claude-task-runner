@@ -26,8 +26,12 @@ export function Dashboard({
     reviews,
     cancelReview,
     clearCompleted: clearCompletedReviews,
+    dismissReview,
+    retryReview,
+    reviewsEnabled,
     syncReviews,
     syncing,
+    toggleReviewsEnabled,
   } = useReviews(token, reviewVersion);
 
   useEffect(() => startPolling(5000), [startPolling]);
@@ -66,10 +70,14 @@ export function Dashboard({
         <LogViewer lines={lines} onClear={clearLines} />
         <ReviewsPanel
           reviews={reviews}
+          reviewsEnabled={reviewsEnabled}
           syncing={syncing}
           onCancel={(id) => void cancelReview(id)}
           onClear={() => void clearCompletedReviews()}
+          onDismiss={(id) => void dismissReview(id)}
+          onRetry={(id) => void retryReview(id)}
           onSync={() => void syncReviews()}
+          onToggleEnabled={(enabled) => void toggleReviewsEnabled(enabled)}
         />
         <ReposPanel token={token} />
         <TaskHistory

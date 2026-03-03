@@ -4,13 +4,22 @@ import { createServer } from "node:http";
 import { extname, join, resolve } from "node:path";
 
 import type { ClickUpWebhookPayload } from "./clickup/types.js";
-import type { GitHubPullRequestEvent } from "./github/types.js";
+import type {
+  GitHubPullRequestEvent,
+  GitHubPullRequestReviewEvent,
+} from "./github/types.js";
 
 import { handleAdminApi } from "./admin/api.js";
 import { handleUpgrade, setupWebSocket } from "./admin/websocket.js";
 import { addComment, getRepoUrl, getTask } from "./clickup/client.js";
 import { getConfig } from "./config.js";
-import { getReviewRunByPR, hasActiveRun, hasCompletedRun } from "./db.js";
+import {
+  getReviewRunByPR,
+  getSetting,
+  hasActiveRun,
+  hasCompletedRun,
+  updateReviewRun,
+} from "./db.js";
 import { taskEvents } from "./events.js";
 import { executeTask } from "./executor.js";
 import { createChildLogger } from "./logger.js";
@@ -156,6 +165,15 @@ export function startWebhookServer(): void {
           res.end("OK");
 
           const event = req.headers["x-github-event"] as string | undefined;
+
+          if (event === "pull_request_review") {
+            const payload = JSON.parse(
+              rawBody.toString(),
+            ) as GitHubPullRequestReviewEvent;
+            handleGitHubReviewEvent(payload);
+            return;
+          }
+
           if (event !== "pull_request") {
             log.debug({ event }, "Ignoring non-PR GitHub event");
             return;
@@ -239,6 +257,11 @@ async function drainQueue(): Promise<void> {
 }
 
 function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
+  if (getSetting("reviews_enabled", "true") !== "true") {
+    log.debug("Reviews disabled via settings, ignoring GitHub PR event");
+    return;
+  }
+
   const config = getConfig();
   if (!config.GITHUB_USERNAME) {
     log.debug("GITHUB_USERNAME not configured, ignoring GitHub PR event");
@@ -277,6 +300,35 @@ function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
     pr_title: pr.title,
     pr_url: pr.html_url,
     repo_full_name: repo,
+  });
+}
+
+function handleGitHubReviewEvent(payload: GitHubPullRequestReviewEvent): void {
+  if (payload.action !== "submitted") {
+    log.debug(
+      { action: payload.action },
+      "Ignoring non-submitted review event",
+    );
+    return;
+  }
+
+  const repo = payload.repository.full_name;
+  const prNumber = payload.pull_request.number;
+
+  const existing = getReviewRunByPR(repo, prNumber);
+  if (!existing || existing.status !== "ready") {
+    log.debug({ prNumber, repo }, "No ready review to mark as approved");
+    return;
+  }
+
+  log.info(
+    { prNumber, repo, reviewId: existing.id },
+    "Marking review as approved",
+  );
+  updateReviewRun(existing.id, { status: "approved" });
+  taskEvents.emit("review:status", {
+    reviewId: existing.id,
+    status: "approved",
   });
 }
 

@@ -35,6 +35,7 @@ export interface ReviewRun {
 }
 
 export type ReviewRunStatus =
+  | "approved"
   | "cloning"
   | "failed"
   | "queued"
@@ -65,9 +66,15 @@ export type TaskRunStatus =
 export function deleteCompletedReviews(): number {
   const db = getDb();
   const result = db
-    .prepare(`DELETE FROM review_runs WHERE status IN ('ready', 'failed')`)
+    .prepare(`DELETE FROM review_runs WHERE status = 'failed'`)
     .run();
   return result.changes;
+}
+
+export function deleteReviewRun(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare(`DELETE FROM review_runs WHERE id = ?`).run(id);
+  return result.changes > 0;
 }
 
 export function deleteCompletedRuns(): number {
@@ -127,7 +134,7 @@ export function hasActiveReview(
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id FROM review_runs WHERE repo_full_name = ? AND pr_number = ? AND status NOT IN ('ready', 'failed') LIMIT 1`,
+      `SELECT id FROM review_runs WHERE repo_full_name = ? AND pr_number = ? AND status NOT IN ('ready', 'failed', 'approved') LIMIT 1`,
     )
     .get(repoFullName, prNumber);
   return !!row;
@@ -278,13 +285,22 @@ export function listRuns(options?: {
   return { rows, total };
 }
 
+export function resetReviewRun(id: number): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE review_runs
+     SET status = 'queued', error_message = NULL, cost_usd = NULL, review_id = NULL, comment_count = 0, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(id);
+}
+
 export function markStaleReviewsAsFailed() {
   const db = getDb();
   const result = db
     .prepare(
       `UPDATE review_runs
        SET status = 'failed', error_message = 'Process restarted', updated_at = datetime('now')
-       WHERE status NOT IN ('ready', 'failed')`,
+       WHERE status NOT IN ('ready', 'failed', 'approved')`,
     )
     .run();
 
@@ -356,6 +372,22 @@ export function updateRun(
   );
 }
 
+export function getSetting(key: string, defaultValue: string): string {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT value FROM settings WHERE key = ?`)
+    .get(key) as { value: string } | undefined;
+  return row?.value ?? defaultValue;
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
+}
+
 export function upsertRepo(
   repoUrl: string,
   diskPath: string,
@@ -405,6 +437,11 @@ function migrate(db: Database.Database) {
     );
     CREATE UNIQUE INDEX IF NOT EXISTS idx_review_runs_pr
       ON review_runs(repo_full_name, pr_number);
+
+    CREATE TABLE IF NOT EXISTS settings (
+      key   TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
 
     CREATE TABLE IF NOT EXISTS cloned_repos (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,

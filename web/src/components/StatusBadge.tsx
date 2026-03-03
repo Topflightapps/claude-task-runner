@@ -1,4 +1,5 @@
 const STATUS_COLORS: Record<string, string> = {
+  approved: "bg-green-900 text-green-300",
   claimed: "bg-yellow-900 text-yellow-300",
   cloning: "bg-blue-900 text-blue-300",
   creating_pr: "bg-purple-900 text-purple-300",

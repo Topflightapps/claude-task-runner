@@ -25,6 +25,20 @@ export interface GitHubPullRequestEvent {
   };
 }
 
+export interface GitHubPullRequestReviewEvent {
+  action: string;
+  pull_request: {
+    number: number;
+  };
+  repository: {
+    full_name: string;
+  };
+  review: {
+    id: number;
+    state: string;
+  };
+}
+
 export interface PendingReviewResponse {
   id: number;
 }

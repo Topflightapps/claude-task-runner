@@ -6,11 +6,15 @@ import {
   deleteCompletedReviews,
   deleteCompletedRuns,
   deleteRepo,
+  deleteReviewRun,
   getReviewRun,
   getRun,
+  getSetting,
   listRepos,
   listReviewRuns,
   listRuns,
+  resetReviewRun,
+  setSetting,
   updateReviewRun,
   updateRun,
 } from "../db.js";
@@ -38,7 +42,7 @@ export function handleAdminApi(
 
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, DELETE, OPTIONS");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (method === "OPTIONS") {
@@ -237,6 +241,53 @@ export function handleAdminApi(
     return;
   }
 
+  // POST /api/reviews/:id/retry
+  const reviewRetryMatch = /^\/api\/reviews\/(\d+)\/retry$/.exec(path);
+  if (reviewRetryMatch && method === "POST") {
+    const id = Number(reviewRetryMatch[1]);
+    const review = getReviewRun(id);
+    if (!review) {
+      json(res, 404, { error: "Review not found" });
+      return;
+    }
+    if (review.status !== "failed") {
+      json(res, 400, { error: "Only failed reviews can be retried" });
+      return;
+    }
+
+    void (async () => {
+      try {
+        const body = await readBody(req);
+        void body;
+        const { enqueueReviewById } = await import("../review/queue.js");
+        resetReviewRun(id);
+        enqueueReviewById(id);
+        json(res, 200, { ok: true });
+      } catch {
+        json(res, 500, { error: "Failed to re-queue review" });
+      }
+    })();
+    return;
+  }
+
+  // DELETE /api/reviews/:id — dismiss individual review
+  const reviewDeleteMatch = /^\/api\/reviews\/(\d+)$/.exec(path);
+  if (reviewDeleteMatch && method === "DELETE") {
+    const id = Number(reviewDeleteMatch[1]);
+    const review = getReviewRun(id);
+    if (!review) {
+      json(res, 404, { error: "Review not found" });
+      return;
+    }
+    if (!["ready", "approved", "failed"].includes(review.status)) {
+      json(res, 400, { error: "Can only dismiss finished reviews" });
+      return;
+    }
+    deleteReviewRun(id);
+    json(res, 200, { ok: true });
+    return;
+  }
+
   // DELETE /api/reviews/completed — also kills running reviews and clears queue
   if (path === "/api/reviews/completed" && method === "DELETE") {
     const cancelled = cancelAllReviews();
@@ -254,6 +305,27 @@ export function handleAdminApi(
         json(res, 200, { enqueued });
       } catch {
         json(res, 500, { error: "Failed to sync reviews" });
+      }
+    })();
+    return;
+  }
+
+  // GET /api/settings/reviews-enabled
+  if (path === "/api/settings/reviews-enabled" && method === "GET") {
+    const enabled = getSetting("reviews_enabled", "true") === "true";
+    json(res, 200, { enabled });
+    return;
+  }
+
+  // PUT /api/settings/reviews-enabled
+  if (path === "/api/settings/reviews-enabled" && method === "PUT") {
+    void (async () => {
+      try {
+        const body = JSON.parse(await readBody(req)) as { enabled: boolean };
+        setSetting("reviews_enabled", body.enabled ? "true" : "false");
+        json(res, 200, { enabled: body.enabled });
+      } catch {
+        json(res, 400, { error: "Invalid request body" });
       }
     })();
     return;

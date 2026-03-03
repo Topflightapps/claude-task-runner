@@ -4,16 +4,24 @@ import { StatusBadge } from "./StatusBadge.tsx";
 
 export function ReviewsPanel({
   reviews,
+  reviewsEnabled,
   syncing,
   onCancel,
   onClear,
+  onDismiss,
+  onRetry,
   onSync,
+  onToggleEnabled,
 }: {
   reviews: ReviewRun[];
+  reviewsEnabled: boolean;
   syncing: boolean;
   onCancel: (id: number) => void;
   onClear: () => void;
+  onDismiss: (id: number) => void;
+  onRetry: (id: number) => void;
   onSync: () => void;
+  onToggleEnabled: (enabled: boolean) => void;
 }) {
   const pendingCount = reviews.filter((r) => r.status === "ready").length;
 
@@ -22,6 +30,16 @@ export function ReviewsPanel({
       <div className="mb-3 flex items-center justify-between">
         <div className="flex items-center gap-2">
           <h2 className="text-sm font-semibold text-gray-300">PR Reviews</h2>
+          <button
+            onClick={() => onToggleEnabled(!reviewsEnabled)}
+            className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+              reviewsEnabled
+                ? "bg-green-900 text-green-300"
+                : "bg-gray-800 text-gray-500"
+            }`}
+          >
+            {reviewsEnabled ? "On" : "Off"}
+          </button>
           {pendingCount > 0 && (
             <span className="rounded-full bg-amber-900 px-2 py-0.5 text-xs font-medium text-amber-300">
               {pendingCount} pending
@@ -36,14 +54,12 @@ export function ReviewsPanel({
           >
             {syncing ? "Syncing..." : "Sync Reviews"}
           </button>
-          {reviews.some(
-            (r) => r.status === "ready" || r.status === "failed",
-          ) && (
+          {reviews.some((r) => r.status === "failed") && (
             <button
               onClick={onClear}
               className="rounded bg-gray-800 px-2.5 py-1 text-xs text-gray-400 hover:bg-gray-700"
             >
-              Clear
+              Clear Failed
             </button>
           )}
         </div>
@@ -87,14 +103,32 @@ export function ReviewsPanel({
                   </p>
                 )}
               </div>
-              {!["ready", "failed"].includes(review.status) && (
-                <button
-                  onClick={() => onCancel(review.id)}
-                  className="ml-2 rounded bg-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-800"
-                >
-                  Cancel
-                </button>
-              )}
+              <div className="ml-2 flex gap-1">
+                {review.status === "failed" && (
+                  <button
+                    onClick={() => onRetry(review.id)}
+                    className="rounded bg-yellow-900 px-2 py-1 text-xs text-yellow-300 hover:bg-yellow-800"
+                  >
+                    Retry
+                  </button>
+                )}
+                {["ready", "approved"].includes(review.status) && (
+                  <button
+                    onClick={() => onDismiss(review.id)}
+                    className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-400 hover:bg-gray-700"
+                  >
+                    Dismiss
+                  </button>
+                )}
+                {!["ready", "approved", "failed"].includes(review.status) && (
+                  <button
+                    onClick={() => onCancel(review.id)}
+                    className="rounded bg-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-800"
+                  >
+                    Cancel
+                  </button>
+                )}
+              </div>
             </div>
           ))}
         </div>

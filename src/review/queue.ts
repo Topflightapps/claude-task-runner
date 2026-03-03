@@ -59,6 +59,18 @@ export function cancelAllReviews(): number {
   return cancelled.length;
 }
 
+export function enqueueReviewById(id: number): void {
+  log.info({ reviewId: id }, "Re-enqueuing existing review");
+
+  queue.push(id);
+  emitQueueState();
+
+  if (!running) {
+    running = true;
+    void drainReviewQueue();
+  }
+}
+
 export function enqueueReview(item: ReviewQueueItem): number {
   const id = insertReviewRun(item);
 
