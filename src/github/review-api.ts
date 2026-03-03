@@ -225,8 +225,10 @@ function ghApiRequest(
 
     child.on("close", (code) => {
       if (code !== 0) {
+        // Include both stderr and stdout — GitHub puts error details in stdout
+        const details = (stderr + " " + stdout).trim();
         reject(
-          new Error("gh api failed (exit " + String(code) + "): " + stderr),
+          new Error("gh api failed (exit " + String(code) + "): " + details),
         );
       } else {
         resolve(stdout);
