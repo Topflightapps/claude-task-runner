@@ -23,39 +23,40 @@ export interface ReviewResult {
 
 export async function runClaudeReview(
   repoPath: string,
-  diff: string,
+  prBaseBranch: string,
   reviewId: number,
 ): Promise<ReviewResult> {
   const config = getConfig();
 
-  // The prompt instruction goes via -p; the diff is piped through stdin.
-  // This avoids E2BIG when the diff exceeds the OS arg size limit.
-  const prompt = `The user's stdin contains a pull request diff. Review it.
-
-Read the relevant source files in this repository for context. Then analyze the diff and provide a code review.
-
-Output ONLY valid JSON in this exact format (no markdown, no code fences):
-{
-  "summary": "Brief overall assessment of the PR",
-  "comments": [
-    {
-      "path": "relative/file/path.ts",
-      "line": 42,
-      "body": "Your review comment here",
-      "side": "RIGHT"
-    }
-  ]
-}
-
-Focus on:
-- Bugs and logic errors
-- Security issues
-- Performance problems
-- Missing error handling at system boundaries
-- Unclear or misleading code
-
-Do NOT comment on style, formatting, or trivial issues.
-If the code looks good with no substantive issues, return an empty comments array.`;
+  // Let Claude Code explore the repo and diff directly using git — no need to
+  // pipe the diff. The PR branch is already checked out; Claude can run
+  // `git diff origin/main...HEAD` (or equivalent) to see the changes.
+  const prompt =
+    "You are reviewing a pull request. The PR branch is already checked out in this repo. " +
+    "Run `git diff origin/" +
+    prBaseBranch +
+    "...HEAD` to see what changed. " +
+    "Read the relevant source files for context.\n\n" +
+    "Provide a code review as ONLY valid JSON (no markdown, no code fences):\n" +
+    "{\n" +
+    '  "summary": "Brief overall assessment of the PR",\n' +
+    '  "comments": [\n' +
+    "    {\n" +
+    '      "path": "relative/file/path.ts",\n' +
+    '      "line": 42,\n' +
+    '      "body": "Your review comment here",\n' +
+    '      "side": "RIGHT"\n' +
+    "    }\n" +
+    "  ]\n" +
+    "}\n\n" +
+    "Focus on:\n" +
+    "- Bugs and logic errors\n" +
+    "- Security issues\n" +
+    "- Performance problems\n" +
+    "- Missing error handling at system boundaries\n" +
+    "- Unclear or misleading code\n\n" +
+    "Do NOT comment on style, formatting, or trivial issues.\n" +
+    "If the code looks good with no substantive issues, return an empty comments array.";
 
   const args = [
     "-p",
@@ -71,13 +72,7 @@ If the code looks good with no substantive issues, return an empty comments arra
   ensureClaudeConfig();
   log.info({ repoPath, reviewId }, "Starting Claude Code review");
 
-  return spawnReviewProcess(
-    repoPath,
-    args,
-    diff,
-    config.REVIEW_TIMEOUT_MS,
-    reviewId,
-  );
+  return spawnReviewProcess(repoPath, args, config.REVIEW_TIMEOUT_MS, reviewId);
 }
 
 /**
@@ -128,7 +123,6 @@ function parseReviewOutput(text: string): ClaudeReviewOutput | null {
 function spawnReviewProcess(
   cwd: string,
   args: string[],
-  stdinData: string,
   timeoutMs: number,
   reviewId: number,
 ): Promise<ReviewResult> {
@@ -143,7 +137,6 @@ function spawnReviewProcess(
       stdio: ["pipe", "pipe", "pipe"],
     });
 
-    child.stdin.write(stdinData);
     child.stdin.end();
     activeReviewProcesses.set(reviewId, child);
 
@@ -221,7 +214,11 @@ function spawnReviewProcess(
 
       if (code !== 0) {
         log.error(
-          { code, stderr: stderr.slice(0, 2000) },
+          {
+            code,
+            stderr: stderr.slice(0, 2000),
+            stdout: stdout.slice(0, 2000),
+          },
           "Review exited with error",
         );
         resolve({ output: null, success: false });

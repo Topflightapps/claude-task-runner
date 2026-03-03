@@ -1,11 +1,16 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
 import { runClaudeReview } from "../claude/review-runner.js";
+import { getConfig } from "../config.js";
 import { updateReviewRun } from "../db.js";
 import { emitReviewSystemLine, taskEvents } from "../events.js";
 import { ensureRepoForReview } from "../github/manager.js";
-import { createPendingReview, getPRDiff } from "../github/review-api.js";
+import { createPendingReview } from "../github/review-api.js";
 import { createChildLogger } from "../logger.js";
 import { notifySlack } from "../notifications/slack.js";
 
+const execFileAsync = promisify(execFile);
 const log = createChildLogger("review-executor");
 
 export async function executeReview(
@@ -24,25 +29,16 @@ export async function executeReview(
 
     const repoPath = await ensureRepoForReview(repoFullName, prBranch);
 
-    // 2. Get PR diff
-    emitReviewSystemLine(reviewId, "Fetching PR diff...");
-    const diff = await getPRDiff(repoFullName, prNumber);
+    // 2. Get the PR base branch (e.g. main, develop) via gh pr view
+    emitReviewSystemLine(reviewId, "Fetching PR details...");
+    const baseBranch = await getBaseBranch(repoFullName, prNumber);
 
-    if (!diff.trim()) {
-      updateReviewRun(reviewId, {
-        error_message: "PR has no diff",
-        status: "failed",
-      });
-      taskEvents.emit("review:status", { reviewId, status: "failed" });
-      return;
-    }
-
-    // 3. Run Claude review
+    // 3. Run Claude review — Claude will git diff against the base branch itself
     emitReviewSystemLine(reviewId, "Running Claude Code review...");
     updateReviewRun(reviewId, { status: "reviewing" });
     taskEvents.emit("review:status", { reviewId, status: "reviewing" });
 
-    const result = await runClaudeReview(repoPath, diff, reviewId);
+    const result = await runClaudeReview(repoPath, baseBranch, reviewId);
 
     if (!result.success || !result.output) {
       updateReviewRun(reviewId, {
@@ -109,5 +105,38 @@ export async function executeReview(
       status: "failed",
     });
     taskEvents.emit("review:status", { reviewId, status: "failed" });
+  }
+}
+
+async function getBaseBranch(
+  repoFullName: string,
+  prNumber: number,
+): Promise<string> {
+  const config = getConfig();
+  try {
+    const { stdout } = await execFileAsync(
+      "gh",
+      [
+        "pr",
+        "view",
+        String(prNumber),
+        "--repo",
+        repoFullName,
+        "--json",
+        "baseRefName",
+      ],
+      {
+        env: { ...process.env, GH_TOKEN: config.GITHUB_TOKEN },
+        maxBuffer: 10 * 1024 * 1024,
+      },
+    );
+    const data = JSON.parse(stdout) as { baseRefName: string };
+    return data.baseRefName;
+  } catch (err) {
+    log.warn(
+      { error: err, prNumber, repoFullName },
+      "Failed to get base branch, defaulting to main",
+    );
+    return "main";
   }
 }
