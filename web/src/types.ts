@@ -40,6 +40,7 @@ export interface ReviewRun {
   pr_number: number;
   pr_title: string;
   pr_url: string;
+  re_review_count: number;
   repo_full_name: string;
   review_id: number | null;
   started_at: string;

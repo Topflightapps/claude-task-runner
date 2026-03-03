@@ -13,6 +13,53 @@ interface GHReview {
   user: { login: string };
 }
 
+export interface PreviousComment {
+  body: string;
+  line: number;
+  path: string;
+}
+
+/**
+ * Fetch the curated comments from the most recent CHANGES_REQUESTED review.
+ */
+export async function fetchReviewComments(
+  repoFullName: string,
+  prNumber: number,
+): Promise<PreviousComment[]> {
+  const endpoint =
+    "repos/" + repoFullName + "/pulls/" + String(prNumber) + "/reviews";
+
+  const stdout = await ghApiGet(endpoint);
+  const reviews = JSON.parse(stdout) as GHReview[];
+
+  // Find the most recent CHANGES_REQUESTED review
+  const changesRequested = reviews
+    .filter((r) => r.state === "CHANGES_REQUESTED")
+    .sort((a, b) => b.id - a.id);
+
+  if (changesRequested.length === 0) {
+    log.warn({ prNumber, repoFullName }, "No CHANGES_REQUESTED review found");
+    return [];
+  }
+
+  const reviewId = changesRequested[0].id;
+  const commentsEndpoint = endpoint + "/" + String(reviewId) + "/comments";
+
+  const commentsStdout = await ghApiGet(commentsEndpoint);
+  const comments = JSON.parse(commentsStdout) as Array<{
+    body: string;
+    line: number;
+    path: string;
+  }>;
+
+  log.info(
+    { commentCount: comments.length, prNumber, repoFullName, reviewId },
+    "Fetched previous review comments",
+  );
+
+  return comments.map((c) => ({ body: c.body, line: c.line, path: c.path }));
+}
+
 /**
  * Create a pending review on a PR. Dismisses any existing pending reviews
  * first, then tries to submit all comments at once. If that fails (e.g. line

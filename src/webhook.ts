@@ -18,6 +18,7 @@ import {
   getSetting,
   hasActiveRun,
   hasCompletedRun,
+  resetReviewRun,
   updateReviewRun,
 } from "./db.js";
 import { taskEvents } from "./events.js";
@@ -272,6 +273,23 @@ function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
   const pr = payload.pull_request;
   const repo = payload.repository.full_name;
 
+  // Handle synchronize (new commits pushed) — trigger re-review if changes_requested
+  if (action === "synchronize") {
+    const existing = getReviewRunByPR(repo, pr.number);
+    if (existing && existing.status === "changes_requested") {
+      log.info(
+        { prNumber: pr.number, repo, reviewId: existing.id },
+        "New commits pushed — triggering re-review",
+      );
+      resetReviewRun(existing.id);
+      void (async () => {
+        const { enqueueReviewById } = await import("./review/queue.js");
+        enqueueReviewById(existing.id);
+      })();
+    }
+    return;
+  }
+
   // Match review_requested where the requested reviewer is us
   if (action === "review_requested") {
     if (payload.requested_reviewer?.login !== config.GITHUB_USERNAME) {
@@ -314,22 +332,35 @@ function handleGitHubReviewEvent(payload: GitHubPullRequestReviewEvent): void {
 
   const repo = payload.repository.full_name;
   const prNumber = payload.pull_request.number;
+  const reviewState = payload.review.state;
 
   const existing = getReviewRunByPR(repo, prNumber);
   if (!existing || existing.status !== "ready") {
-    log.debug({ prNumber, repo }, "No ready review to mark as approved");
+    log.debug({ prNumber, repo }, "No ready review to update");
     return;
   }
 
-  log.info(
-    { prNumber, repo, reviewId: existing.id },
-    "Marking review as approved",
-  );
-  updateReviewRun(existing.id, { status: "approved" });
-  taskEvents.emit("review:status", {
-    reviewId: existing.id,
-    status: "approved",
-  });
+  if (reviewState === "changes_requested") {
+    log.info(
+      { prNumber, repo, reviewId: existing.id },
+      "Marking review as changes_requested",
+    );
+    updateReviewRun(existing.id, { status: "changes_requested" });
+    taskEvents.emit("review:status", {
+      reviewId: existing.id,
+      status: "changes_requested",
+    });
+  } else {
+    log.info(
+      { prNumber, repo, reviewId: existing.id },
+      "Marking review as approved",
+    );
+    updateReviewRun(existing.id, { status: "approved" });
+    taskEvents.emit("review:status", {
+      reviewId: existing.id,
+      status: "approved",
+    });
+  }
 }
 
 async function processTask(taskId: string): Promise<void> {

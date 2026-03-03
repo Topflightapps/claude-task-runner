@@ -27,6 +27,7 @@ export interface ReviewRun {
   pr_number: number;
   pr_title: string;
   pr_url: string;
+  re_review_count: number;
   repo_full_name: string;
   review_id: null | number;
   started_at: string;
@@ -36,6 +37,7 @@ export interface ReviewRun {
 
 export type ReviewRunStatus =
   | "approved"
+  | "changes_requested"
   | "cloning"
   | "failed"
   | "queued"
@@ -134,7 +136,7 @@ export function hasActiveReview(
   const db = getDb();
   const row = db
     .prepare(
-      `SELECT id FROM review_runs WHERE repo_full_name = ? AND pr_number = ? AND status NOT IN ('ready', 'failed', 'approved') LIMIT 1`,
+      `SELECT id FROM review_runs WHERE repo_full_name = ? AND pr_number = ? AND status NOT IN ('ready', 'failed', 'approved', 'changes_requested') LIMIT 1`,
     )
     .get(repoFullName, prNumber);
   return !!row;
@@ -289,7 +291,7 @@ export function resetReviewRun(id: number): void {
   const db = getDb();
   db.prepare(
     `UPDATE review_runs
-     SET status = 'queued', error_message = NULL, cost_usd = NULL, review_id = NULL, comment_count = 0, updated_at = datetime('now')
+     SET status = 'queued', error_message = NULL, cost_usd = NULL, review_id = NULL, comment_count = 0, re_review_count = re_review_count + 1, updated_at = datetime('now')
      WHERE id = ?`,
   ).run(id);
 }
@@ -300,7 +302,7 @@ export function markStaleReviewsAsFailed() {
     .prepare(
       `UPDATE review_runs
        SET status = 'failed', error_message = 'Process restarted', updated_at = datetime('now')
-       WHERE status NOT IN ('ready', 'failed', 'approved')`,
+       WHERE status NOT IN ('ready', 'failed', 'approved', 'changes_requested')`,
     )
     .run();
 
@@ -452,4 +454,13 @@ function migrate(db: Database.Database) {
       last_used_at    TEXT DEFAULT (datetime('now'))
     );
   `);
+
+  // Add re_review_count column (idempotent)
+  try {
+    db.exec(
+      `ALTER TABLE review_runs ADD COLUMN re_review_count INTEGER DEFAULT 0`,
+    );
+  } catch {
+    // Column already exists
+  }
 }

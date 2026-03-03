@@ -279,7 +279,7 @@ export function handleAdminApi(
       json(res, 404, { error: "Review not found" });
       return;
     }
-    if (!["ready", "approved", "failed"].includes(review.status)) {
+    if (!["ready", "approved", "failed", "changes_requested"].includes(review.status)) {
       json(res, 400, { error: "Can only dismiss finished reviews" });
       return;
     }

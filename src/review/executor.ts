@@ -1,12 +1,15 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
-import { runClaudeReview } from "../claude/review-runner.js";
+import { runClaudeReReview, runClaudeReview } from "../claude/review-runner.js";
 import { getConfig } from "../config.js";
-import { updateReviewRun } from "../db.js";
+import { getReviewRun, updateReviewRun } from "../db.js";
 import { emitReviewSystemLine, taskEvents } from "../events.js";
 import { ensureRepoForReview } from "../github/manager.js";
-import { createPendingReview } from "../github/review-api.js";
+import {
+  createPendingReview,
+  fetchReviewComments,
+} from "../github/review-api.js";
 import { createChildLogger } from "../logger.js";
 import { notifySlack } from "../notifications/slack.js";
 
@@ -34,11 +37,35 @@ export async function executeReview(
     const baseBranch = await getBaseBranch(repoFullName, prNumber);
 
     // 3. Run Claude review — Claude will git diff against the base branch itself
-    emitReviewSystemLine(reviewId, "Running Claude Code review...");
     updateReviewRun(reviewId, { status: "reviewing" });
     taskEvents.emit("review:status", { reviewId, status: "reviewing" });
 
-    const result = await runClaudeReview(repoPath, baseBranch, reviewId);
+    const review = getReviewRun(reviewId);
+    const isReReview = review !== undefined && review.re_review_count > 0;
+
+    let result;
+    if (isReReview) {
+      emitReviewSystemLine(reviewId, "Fetching previous review comments...");
+      const previousComments = await fetchReviewComments(
+        repoFullName,
+        prNumber,
+      );
+      emitReviewSystemLine(
+        reviewId,
+        "Running Claude Code re-review (" +
+          String(previousComments.length) +
+          " previous comments)...",
+      );
+      result = await runClaudeReReview(
+        repoPath,
+        baseBranch,
+        reviewId,
+        previousComments,
+      );
+    } else {
+      emitReviewSystemLine(reviewId, "Running Claude Code review...");
+      result = await runClaudeReview(repoPath, baseBranch, reviewId);
+    }
 
     if (!result.success || !result.output) {
       updateReviewRun(reviewId, {

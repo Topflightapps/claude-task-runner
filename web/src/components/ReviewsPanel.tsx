@@ -97,6 +97,11 @@ export function ReviewsPanel({
                     {review.comment_count === 1 ? "" : "s"} — open PR to publish
                   </p>
                 )}
+                {review.status === "changes_requested" && (
+                  <p className="text-xs text-orange-400">
+                    Awaiting new commits to trigger re-review
+                  </p>
+                )}
                 {review.error_message && (
                   <p className="truncate text-xs text-red-400">
                     {review.error_message}
@@ -112,7 +117,7 @@ export function ReviewsPanel({
                     Retry
                   </button>
                 )}
-                {["ready", "approved"].includes(review.status) && (
+                {["ready", "approved", "changes_requested"].includes(review.status) && (
                   <button
                     onClick={() => onDismiss(review.id)}
                     className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-400 hover:bg-gray-700"
@@ -120,7 +125,7 @@ export function ReviewsPanel({
                     Dismiss
                   </button>
                 )}
-                {!["ready", "approved", "failed"].includes(review.status) && (
+                {!["ready", "approved", "failed", "changes_requested"].includes(review.status) && (
                   <button
                     onClick={() => onCancel(review.id)}
                     className="rounded bg-red-900 px-2 py-1 text-xs text-red-300 hover:bg-red-800"

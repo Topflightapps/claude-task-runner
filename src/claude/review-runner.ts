@@ -3,6 +3,7 @@ import { copyFileSync, existsSync, readdirSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
+import type { PreviousComment } from "../github/review-api.js";
 import type { ClaudeReviewOutput } from "../github/types.js";
 
 import { getConfig } from "../config.js";
@@ -20,6 +21,72 @@ export interface ReviewResult {
   costUsd?: number;
   output: ClaudeReviewOutput | null;
   success: boolean;
+}
+
+export async function runClaudeReReview(
+  repoPath: string,
+  prBaseBranch: string,
+  reviewId: number,
+  previousComments: PreviousComment[],
+): Promise<ReviewResult> {
+  const config = getConfig();
+
+  const commentsList = previousComments
+    .map(
+      (c, i) =>
+        `${String(i + 1)}. **${c.path}** (line ${String(c.line)}): ${c.body}`,
+    )
+    .join("\n");
+
+  const prompt =
+    "You are re-reviewing a pull request after the author pushed fixes in response to review feedback. " +
+    "The PR branch is already checked out in this repo. " +
+    "Run `git diff origin/" +
+    prBaseBranch +
+    "...HEAD` to see the current changes.\n\n" +
+    "The previous review requested changes with these comments:\n" +
+    commentsList +
+    "\n\n" +
+    "For each previous comment, check whether the concern was addressed in the new code. " +
+    "Also look for any NEW issues introduced by the fixes.\n\n" +
+    'CRITICAL: The "line" in each comment MUST be a line number that appears in the diff output. ' +
+    "GitHub's review API only accepts comments on lines that are part of the diff hunks " +
+    "(added/removed/modified lines and their surrounding context lines shown in the diff). " +
+    "Use the line numbers from the RIGHT side of the diff (the new file version). " +
+    "If you want to comment on code that is NOT in the diff, include it in the summary instead.\n\n" +
+    "Provide a code review as ONLY valid JSON (no markdown, no code fences):\n" +
+    "{\n" +
+    '  "summary": "Brief assessment — which previous concerns were addressed, which remain, any new issues",\n' +
+    '  "comments": [\n' +
+    "    {\n" +
+    '      "path": "relative/file/path.ts",\n' +
+    '      "line": 42,\n' +
+    '      "body": "Your review comment here",\n' +
+    '      "side": "RIGHT"\n' +
+    "    }\n" +
+    "  ]\n" +
+    "}\n\n" +
+    "Only include comments for UNRESOLVED previous concerns or NEW issues. " +
+    "If all previous concerns were addressed and no new issues exist, return an empty comments array.";
+
+  const args = [
+    "-p",
+    prompt,
+    "--output-format",
+    "stream-json",
+    "--verbose",
+    "--dangerously-skip-permissions",
+    "--max-turns",
+    "50",
+  ];
+
+  ensureClaudeConfig();
+  log.info(
+    { previousCommentCount: previousComments.length, repoPath, reviewId },
+    "Starting Claude Code re-review",
+  );
+
+  return spawnReviewProcess(repoPath, args, config.REVIEW_TIMEOUT_MS, reviewId);
 }
 
 export async function runClaudeReview(
