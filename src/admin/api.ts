@@ -2,12 +2,36 @@ import type { IncomingMessage, ServerResponse } from "node:http";
 
 import { rmSync } from "node:fs";
 
-import { deleteCompletedRuns, deleteRepo, getRun, listRepos, listRuns, updateRun } from "../db.js";
-import { activeProcesses, cancelledRuns, outputBuffer, taskEvents } from "../events.js";
+import {
+  deleteCompletedReviews,
+  deleteCompletedRuns,
+  deleteRepo,
+  getReviewRun,
+  getRun,
+  listRepos,
+  listReviewRuns,
+  listRuns,
+  updateReviewRun,
+  updateRun,
+} from "../db.js";
+import {
+  activeProcesses,
+  activeReviewProcesses,
+  cancelledRuns,
+  outputBuffer,
+  reviewOutputBuffer,
+  taskEvents,
+} from "../events.js";
 import { handleLogin, validateAuth } from "./auth.js";
 
-export function handleAdminApi(req: IncomingMessage, res: ServerResponse): void {
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+export function handleAdminApi(
+  req: IncomingMessage,
+  res: ServerResponse,
+): void {
+  const url = new URL(
+    req.url ?? "/",
+    `http://${req.headers.host ?? "localhost"}`,
+  );
   const path = url.pathname;
   const method = req.method ?? "GET";
 
@@ -155,6 +179,84 @@ export function handleAdminApi(req: IncomingMessage, res: ServerResponse): void 
     return;
   }
 
+  // GET /api/reviews
+  if (path === "/api/reviews" && method === "GET") {
+    const status = url.searchParams.get("status") ?? undefined;
+    const limit = Number(url.searchParams.get("limit")) || 50;
+    const offset = Number(url.searchParams.get("offset")) || 0;
+    const result = listReviewRuns({ limit, offset, status });
+    json(res, 200, result);
+    return;
+  }
+
+  // GET /api/reviews/active
+  if (path === "/api/reviews/active" && method === "GET") {
+    const reviewing = listReviewRuns({ status: "reviewing" }).rows;
+    const cloning = listReviewRuns({ status: "cloning" }).rows;
+    const queued = listReviewRuns({ status: "queued" }).rows;
+    const active = [...reviewing, ...cloning, ...queued];
+    const currentReview = active.length > 0 ? active[0] : null;
+    const buffer = currentReview
+      ? (reviewOutputBuffer.get(currentReview.id) ?? [])
+      : [];
+
+    json(res, 200, { currentReview, output: buffer });
+    return;
+  }
+
+  // POST /api/reviews/:id/cancel
+  const reviewCancelMatch = /^\/api\/reviews\/(\d+)\/cancel$/.exec(path);
+  if (reviewCancelMatch && method === "POST") {
+    const id = Number(reviewCancelMatch[1]);
+    const review = getReviewRun(id);
+    if (!review) {
+      json(res, 404, { error: "Review not found" });
+      return;
+    }
+    if (review.status === "ready" || review.status === "failed") {
+      json(res, 400, { error: "Review already finished" });
+      return;
+    }
+
+    const proc = activeReviewProcesses.get(id);
+    if (proc) {
+      proc.kill("SIGTERM");
+      setTimeout(() => {
+        if (!proc.killed) proc.kill("SIGKILL");
+      }, 5_000);
+    }
+
+    updateReviewRun(id, {
+      error_message: "Cancelled by admin",
+      status: "failed",
+    });
+    taskEvents.emit("review:status", { reviewId: id, status: "failed" });
+
+    json(res, 200, { ok: true });
+    return;
+  }
+
+  // DELETE /api/reviews/completed
+  if (path === "/api/reviews/completed" && method === "DELETE") {
+    const count = deleteCompletedReviews();
+    json(res, 200, { deleted: count });
+    return;
+  }
+
+  // POST /api/reviews/sync
+  if (path === "/api/reviews/sync" && method === "POST") {
+    void (async () => {
+      try {
+        const { syncPendingReviews } = await import("../review/sync.js");
+        const enqueued = await syncPendingReviews();
+        json(res, 200, { enqueued });
+      } catch {
+        json(res, 500, { error: "Failed to sync reviews" });
+      }
+    })();
+    return;
+  }
+
   json(res, 404, { error: "Not found" });
 }
 
@@ -167,7 +269,9 @@ function readBody(req: IncomingMessage): Promise<string> {
   return new Promise((resolve, reject) => {
     const chunks: Buffer[] = [];
     req.on("data", (chunk: Buffer) => chunks.push(chunk));
-    req.on("end", () => { resolve(Buffer.concat(chunks).toString()); });
+    req.on("end", () => {
+      resolve(Buffer.concat(chunks).toString());
+    });
     req.on("error", reject);
   });
 }

@@ -3,8 +3,15 @@ import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
 
 export interface TaskEvents {
-  "output": { line: string; runId: number; stream: "stderr" | "stdout" };
+  output: { line: string; runId: number; stream: "stderr" | "stdout" };
   "queue:changed": { queue: string[]; runningTaskId: null | string };
+  "review:output": {
+    line: string;
+    reviewId: number;
+    stream: "stderr" | "stdout";
+  };
+  "review:queue": { queue: number[]; runningReviewId: null | number };
+  "review:status": { reviewId: number; status: string };
   "status:changed": { runId: number; status: string };
 }
 
@@ -57,3 +64,27 @@ export function emitSystemLine(runId: number, message: string): void {
 
 /** Set of runIds that have been cancelled */
 export const cancelledRuns = new Set<number>();
+
+/** Map<reviewId, ChildProcess> for review cancellation */
+export const activeReviewProcesses = new Map<number, ChildProcess>();
+
+/** Map<reviewId, string[]> — ring buffer of last 1000 lines per reviewId */
+export const reviewOutputBuffer = new Map<number, string[]>();
+
+export function appendReviewOutput(reviewId: number, line: string): void {
+  let buffer = reviewOutputBuffer.get(reviewId);
+  if (!buffer) {
+    buffer = [];
+    reviewOutputBuffer.set(reviewId, buffer);
+  }
+  buffer.push(line);
+  if (buffer.length > OUTPUT_BUFFER_SIZE) {
+    buffer.splice(0, buffer.length - OUTPUT_BUFFER_SIZE);
+  }
+}
+
+export function emitReviewSystemLine(reviewId: number, message: string): void {
+  const line = `[system] ${message}`;
+  appendReviewOutput(reviewId, line);
+  taskEvents.emit("review:output", { line, reviewId, stream: "stdout" });
+}

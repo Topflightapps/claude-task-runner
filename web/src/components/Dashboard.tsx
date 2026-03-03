@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 
+import { useReviews } from "../hooks/useReviews.ts";
 import { useTaskRuns } from "../hooks/useTaskRuns.ts";
 import { useWebSocket } from "../hooks/useWebSocket.ts";
 import { ActiveTask } from "./ActiveTask.tsx";
 import { LogViewer } from "./LogViewer.tsx";
 import { QueuePanel } from "./QueuePanel.tsx";
 import { ReposPanel } from "./ReposPanel.tsx";
+import { ReviewsPanel } from "./ReviewsPanel.tsx";
 import { TaskHistory } from "./TaskHistory.tsx";
 
 export function Dashboard({
@@ -15,17 +17,22 @@ export function Dashboard({
   token: string;
   onLogout: () => void;
 }) {
+  const { runs, startPolling, cancelRun, retryRun, clearCompleted } =
+    useTaskRuns(token);
+
   const {
-    runs,
-    startPolling,
-    cancelRun,
-    retryRun,
-    clearCompleted,
-  } = useTaskRuns(token);
+    reviews,
+    startPolling: startReviewPolling,
+    cancelReview,
+    clearCompleted: clearCompletedReviews,
+    syncReviews,
+    syncing,
+  } = useReviews(token);
 
   const { lines, connected, clearLines } = useWebSocket(token);
 
   useEffect(() => startPolling(5000), [startPolling]);
+  useEffect(() => startReviewPolling(5000), [startReviewPolling]);
 
   const activeRun =
     runs.find((r) => !["done", "failed"].includes(r.status)) ?? null;
@@ -38,7 +45,9 @@ export function Dashboard({
             <h1 className="text-lg font-semibold">Claude Task Runner</h1>
             <span
               className={`h-2 w-2 rounded-full ${connected ? "bg-green-500" : "bg-red-500"}`}
-              title={connected ? "WebSocket connected" : "WebSocket disconnected"}
+              title={
+                connected ? "WebSocket connected" : "WebSocket disconnected"
+              }
             />
           </div>
           <button
@@ -57,6 +66,13 @@ export function Dashboard({
           <QueuePanel runs={runs} />
         </div>
         <LogViewer lines={lines} onClear={clearLines} />
+        <ReviewsPanel
+          reviews={reviews}
+          syncing={syncing}
+          onCancel={(id) => void cancelReview(id)}
+          onClear={() => void clearCompletedReviews()}
+          onSync={() => void syncReviews()}
+        />
         <ReposPanel token={token} />
         <TaskHistory
           runs={runs}

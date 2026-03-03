@@ -1,5 +1,9 @@
 import { loadConfig } from "./config.js";
-import { initDb, markStaleRunsAsFailed } from "./db.js";
+import {
+  initDb,
+  markStaleReviewsAsFailed,
+  markStaleRunsAsFailed,
+} from "./db.js";
 import { createChildLogger } from "./logger.js";
 import { startWebhookServer } from "./webhook.js";
 
@@ -16,6 +20,7 @@ function main() {
 
   initDb();
   markStaleRunsAsFailed();
+  markStaleReviewsAsFailed();
 
   startWebhookServer();
 

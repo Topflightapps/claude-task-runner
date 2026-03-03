@@ -74,6 +74,31 @@ export async function ensureRepo(repoUrl: string): Promise<string> {
   return dir;
 }
 
+export async function ensureRepoForReview(
+  repoFullName: string,
+  prBranch: string,
+): Promise<string> {
+  const config = getConfig();
+  const dir = join(config.WORK_DIR, "reviews", repoFullName);
+  const httpsUrl = `https://github.com/${repoFullName}.git`;
+
+  if (existsSync(join(dir, ".git"))) {
+    log.info({ dir }, "Review repo exists, fetching latest");
+    await git(dir, "fetch", "origin");
+  } else {
+    log.info({ dir, repoUrl: httpsUrl }, "Cloning repo for review");
+    const parentDir = join(dir, "..");
+    await execFileAsync("mkdir", ["-p", parentDir]);
+    await git(parentDir, "clone", httpsUrl, dir);
+  }
+
+  await git(dir, "checkout", prBranch);
+  await git(dir, "reset", "--hard", `origin/${prBranch}`);
+  await git(dir, "clean", "-fd");
+
+  return dir;
+}
+
 export async function hasChanges(repoPath: string): Promise<boolean> {
   const status = await git(repoPath, "status", "--porcelain");
   return status.length > 0;
@@ -161,7 +186,6 @@ async function git(cwd: string, ...args: string[]) {
     cwd,
     env: {
       ...process.env,
-      GIT_TERMINAL_PROMPT: "0",
       GIT_ASKPASS: "echo",
       GIT_CONFIG_COUNT: "1",
       GIT_CONFIG_KEY_0:
@@ -169,6 +193,7 @@ async function git(cwd: string, ...args: string[]) {
         config.GITHUB_TOKEN +
         "@github.com/.insteadOf",
       GIT_CONFIG_VALUE_0: "https://github.com/",
+      GIT_TERMINAL_PROMPT: "0",
     },
     maxBuffer: 10 * 1024 * 1024,
   });

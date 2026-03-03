@@ -21,7 +21,10 @@ export function handleUpgrade(
     return;
   }
 
-  const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+  const url = new URL(
+    req.url ?? "/",
+    `http://${req.headers.host ?? "localhost"}`,
+  );
   const token = url.searchParams.get("token");
 
   if (!token || !validateTokenString(token)) {
@@ -46,7 +49,13 @@ export function setupWebSocket(): void {
   });
 
   taskEvents.on("output", (data) => {
-    broadcast({ line: data.line, runId: data.runId, stream: data.stream, ts: new Date().toISOString(), type: "output" });
+    broadcast({
+      line: data.line,
+      runId: data.runId,
+      stream: data.stream,
+      ts: new Date().toISOString(),
+      type: "output",
+    });
   });
 
   taskEvents.on("status:changed", (data) => {
@@ -54,7 +63,37 @@ export function setupWebSocket(): void {
   });
 
   taskEvents.on("queue:changed", (data) => {
-    broadcast({ queue: data.queue, running: data.runningTaskId, type: "queue" });
+    broadcast({
+      queue: data.queue,
+      running: data.runningTaskId,
+      type: "queue",
+    });
+  });
+
+  taskEvents.on("review:output", (data) => {
+    broadcast({
+      line: data.line,
+      reviewId: data.reviewId,
+      stream: data.stream,
+      ts: new Date().toISOString(),
+      type: "review:output",
+    });
+  });
+
+  taskEvents.on("review:status", (data) => {
+    broadcast({
+      reviewId: data.reviewId,
+      status: data.status,
+      type: "review:status",
+    });
+  });
+
+  taskEvents.on("review:queue", (data) => {
+    broadcast({
+      queue: data.queue,
+      running: data.runningReviewId,
+      type: "review:queue",
+    });
   });
 }
 

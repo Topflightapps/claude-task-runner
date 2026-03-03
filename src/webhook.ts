@@ -1,18 +1,20 @@
-import { createHmac } from "node:crypto";
+import { createHmac, timingSafeEqual } from "node:crypto";
 import { existsSync, readFileSync, statSync } from "node:fs";
 import { createServer } from "node:http";
 import { extname, join, resolve } from "node:path";
 
 import type { ClickUpWebhookPayload } from "./clickup/types.js";
+import type { GitHubPullRequestEvent } from "./github/types.js";
 
 import { handleAdminApi } from "./admin/api.js";
 import { handleUpgrade, setupWebSocket } from "./admin/websocket.js";
 import { addComment, getRepoUrl, getTask } from "./clickup/client.js";
 import { getConfig } from "./config.js";
-import { hasActiveRun, hasCompletedRun } from "./db.js";
+import { getReviewRunByPR, hasActiveRun, hasCompletedRun } from "./db.js";
 import { taskEvents } from "./events.js";
 import { executeTask } from "./executor.js";
 import { createChildLogger } from "./logger.js";
+import { enqueueReview } from "./review/queue.js";
 
 const log = createChildLogger("webhook");
 
@@ -45,7 +47,10 @@ export function enqueueTask(taskId: string): void {
   void drainQueue();
 }
 
-export function getQueueStatus(): { queue: string[]; runningTaskId: null | string } {
+export function getQueueStatus(): {
+  queue: string[];
+  runningTaskId: null | string;
+} {
   return { queue: [...queue], runningTaskId };
 }
 
@@ -129,6 +134,48 @@ export function startWebhookServer(): void {
       return;
     }
 
+    // GitHub webhook endpoint
+    if (req.method === "POST" && url === "/github-webhook") {
+      void (async () => {
+        try {
+          const rawBody = await readBody(req);
+
+          if (
+            !verifyGitHubSignature(
+              rawBody,
+              req.headers["x-hub-signature-256"] as string | undefined,
+            )
+          ) {
+            log.warn("GitHub webhook request with invalid signature");
+            res.writeHead(401);
+            res.end("Unauthorized");
+            return;
+          }
+
+          res.writeHead(200);
+          res.end("OK");
+
+          const event = req.headers["x-github-event"] as string | undefined;
+          if (event !== "pull_request") {
+            log.debug({ event }, "Ignoring non-PR GitHub event");
+            return;
+          }
+
+          const payload = JSON.parse(
+            rawBody.toString(),
+          ) as GitHubPullRequestEvent;
+          handleGitHubPREvent(payload);
+        } catch (err) {
+          log.error(err, "Error handling GitHub webhook");
+          if (!res.headersSent) {
+            res.writeHead(500);
+            res.end("Internal Server Error");
+          }
+        }
+      })();
+      return;
+    }
+
     // Static file serving for the admin SPA
     if (req.method === "GET" && existsSync(webDistPath)) {
       const urlPath = url.split("?")[0] ?? "/";
@@ -158,7 +205,10 @@ export function startWebhookServer(): void {
 
   // WebSocket upgrade handler
   server.on("upgrade", (req, socket, head) => {
-    const url = new URL(req.url ?? "/", `http://${req.headers.host ?? "localhost"}`);
+    const url = new URL(
+      req.url ?? "/",
+      `http://${req.headers.host ?? "localhost"}`,
+    );
     if (url.pathname === "/ws") {
       handleUpgrade(req, socket, head);
     } else {
@@ -167,10 +217,7 @@ export function startWebhookServer(): void {
   });
 
   server.listen(config.WEBHOOK_PORT, () => {
-    log.info(
-      { port: config.WEBHOOK_PORT },
-      "Webhook server listening",
-    );
+    log.info({ port: config.WEBHOOK_PORT }, "Webhook server listening");
   });
 }
 
@@ -189,6 +236,48 @@ async function drainQueue(): Promise<void> {
   running = false;
   runningTaskId = null;
   taskEvents.emit("queue:changed", { queue: [], runningTaskId: null });
+}
+
+function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
+  const config = getConfig();
+  if (!config.GITHUB_USERNAME) {
+    log.debug("GITHUB_USERNAME not configured, ignoring GitHub PR event");
+    return;
+  }
+
+  const action = payload.action;
+  const pr = payload.pull_request;
+  const repo = payload.repository.full_name;
+
+  // Match review_requested where the requested reviewer is us
+  if (action === "review_requested") {
+    if (payload.requested_reviewer?.login !== config.GITHUB_USERNAME) {
+      log.debug({ action, repo }, "Review request not for us");
+      return;
+    }
+  } else if (action === "assigned") {
+    // Match assigned where the PR assignee is us — but we only care if
+    // there's a review to do. We'll let it through and dedup below.
+  } else {
+    log.debug({ action }, "Ignoring non-review PR action");
+    return;
+  }
+
+  // Dedup: skip if already tracked and not failed
+  const existing = getReviewRunByPR(repo, pr.number);
+  if (existing && existing.status !== "failed") {
+    log.debug({ prNumber: pr.number, repo }, "Review already tracked");
+    return;
+  }
+
+  log.info({ prNumber: pr.number, repo }, "Enqueuing PR review");
+  enqueueReview({
+    pr_branch: pr.head.ref,
+    pr_number: pr.number,
+    pr_title: pr.title,
+    pr_url: pr.html_url,
+    repo_full_name: repo,
+  });
 }
 
 async function processTask(taskId: string): Promise<void> {
@@ -224,6 +313,27 @@ function readBody(req: import("node:http").IncomingMessage): Promise<Buffer> {
     });
     req.on("error", reject);
   });
+}
+
+function verifyGitHubSignature(
+  rawBody: Buffer,
+  signature: string | undefined,
+): boolean {
+  const config = getConfig();
+  if (!config.GITHUB_WEBHOOK_SECRET) {
+    // If no secret configured, skip verification (allow manual testing)
+    return true;
+  }
+  if (!signature) return false;
+
+  const hmac = createHmac("sha256", config.GITHUB_WEBHOOK_SECRET);
+  hmac.update(rawBody);
+  const expected = "sha256=" + hmac.digest("hex");
+
+  const expectedBuf = Buffer.from(expected);
+  const signatureBuf = Buffer.from(signature);
+  if (expectedBuf.length !== signatureBuf.length) return false;
+  return timingSafeEqual(expectedBuf, signatureBuf);
 }
 
 function verifySignature(rawBody: Buffer, signature: string): boolean {

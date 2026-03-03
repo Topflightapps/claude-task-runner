@@ -1,0 +1,37 @@
+export interface ClaudeReviewOutput {
+  comments: ReviewComment[];
+  summary: string;
+}
+
+export interface GitHubPullRequestEvent {
+  action: string;
+  number: number;
+  pull_request: {
+    head: {
+      ref: string;
+    };
+    html_url: string;
+    number: number;
+    title: string;
+    user: {
+      login: string;
+    };
+  };
+  repository: {
+    full_name: string;
+  };
+  requested_reviewer?: {
+    login: string;
+  };
+}
+
+export interface PendingReviewResponse {
+  id: number;
+}
+
+export interface ReviewComment {
+  body: string;
+  line: number;
+  path: string;
+  side?: "LEFT" | "RIGHT";
+}

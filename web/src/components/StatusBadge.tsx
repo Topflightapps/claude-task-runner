@@ -4,6 +4,9 @@ const STATUS_COLORS: Record<string, string> = {
   creating_pr: "bg-purple-900 text-purple-300",
   done: "bg-green-900 text-green-300",
   failed: "bg-red-900 text-red-300",
+  queued: "bg-yellow-900 text-yellow-300",
+  ready: "bg-amber-900 text-amber-300",
+  reviewing: "bg-cyan-900 text-cyan-300",
   running_claude: "bg-cyan-900 text-cyan-300",
 };
 

@@ -14,6 +14,11 @@ const configSchema = z.object({
   FIGMA_MCP_TOKEN: z.string().optional(),
   GITHUB_PR_ASSIGNEE: z.string().optional(),
   GITHUB_TOKEN: z.string().min(1),
+  GITHUB_USERNAME: z.string().optional(),
+  GITHUB_WEBHOOK_SECRET: z.string().optional(),
+
+  REVIEW_TIMEOUT_MS: z.coerce.number().default(15 * 60 * 1000),
+  SLACK_WEBHOOK_URL: z.string().optional(),
 
   WEBHOOK_PORT: z.coerce.number().default(3000),
   WEBHOOK_SECRET: z.string().min(1),

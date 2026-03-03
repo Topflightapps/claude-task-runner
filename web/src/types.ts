@@ -31,7 +31,49 @@ export interface WsQueueMessage {
   queue: string[];
 }
 
-export type WsMessage = WsOutputMessage | WsStatusMessage | WsQueueMessage;
+export interface ReviewRun {
+  comment_count: number;
+  cost_usd: number | null;
+  error_message: string | null;
+  id: number;
+  pr_branch: string;
+  pr_number: number;
+  pr_title: string;
+  pr_url: string;
+  repo_full_name: string;
+  review_id: number | null;
+  started_at: string;
+  status: string;
+  updated_at: string;
+}
+
+export interface WsReviewOutputMessage {
+  type: "review:output";
+  reviewId: number;
+  stream: "stdout" | "stderr";
+  line: string;
+  ts: string;
+}
+
+export interface WsReviewStatusMessage {
+  type: "review:status";
+  reviewId: number;
+  status: string;
+}
+
+export interface WsReviewQueueMessage {
+  type: "review:queue";
+  running: number | null;
+  queue: number[];
+}
+
+export type WsMessage =
+  | WsOutputMessage
+  | WsStatusMessage
+  | WsQueueMessage
+  | WsReviewOutputMessage
+  | WsReviewStatusMessage
+  | WsReviewQueueMessage;
 
 export interface ClonedRepo {
   id: number;

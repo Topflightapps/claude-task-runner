@@ -18,6 +18,29 @@ export interface ClonedRepo {
   size_bytes: null | number;
 }
 
+export interface ReviewRun {
+  comment_count: number;
+  cost_usd: null | number;
+  error_message: null | string;
+  id: number;
+  pr_branch: string;
+  pr_number: number;
+  pr_title: string;
+  pr_url: string;
+  repo_full_name: string;
+  review_id: null | number;
+  started_at: string;
+  status: ReviewRunStatus;
+  updated_at: string;
+}
+
+export type ReviewRunStatus =
+  | "cloning"
+  | "failed"
+  | "queued"
+  | "ready"
+  | "reviewing";
+
 export interface TaskRun {
   branch_name: null | string;
   clickup_id: string;
@@ -38,6 +61,14 @@ export type TaskRunStatus =
   | "done"
   | "failed"
   | "running_claude";
+
+export function deleteCompletedReviews(): number {
+  const db = getDb();
+  const result = db
+    .prepare(`DELETE FROM review_runs WHERE status IN ('ready', 'failed')`)
+    .run();
+  return result.changes;
+}
 
 export function deleteCompletedRuns(): number {
   const db = getDb();
@@ -63,11 +94,43 @@ export function getDb(): Database.Database {
   return _db;
 }
 
+export function getReviewRun(id: number): ReviewRun | undefined {
+  const db = getDb();
+  return db.prepare(`SELECT * FROM review_runs WHERE id = ?`).get(id) as
+    | ReviewRun
+    | undefined;
+}
+
+export function getReviewRunByPR(
+  repoFullName: string,
+  prNumber: number,
+): ReviewRun | undefined {
+  const db = getDb();
+  return db
+    .prepare(
+      `SELECT * FROM review_runs WHERE repo_full_name = ? AND pr_number = ?`,
+    )
+    .get(repoFullName, prNumber) as ReviewRun | undefined;
+}
+
 export function getRun(id: number): TaskRun | undefined {
   const db = getDb();
   return db.prepare(`SELECT * FROM task_runs WHERE id = ?`).get(id) as
     | TaskRun
     | undefined;
+}
+
+export function hasActiveReview(
+  repoFullName: string,
+  prNumber: number,
+): boolean {
+  const db = getDb();
+  const row = db
+    .prepare(
+      `SELECT id FROM review_runs WHERE repo_full_name = ? AND pr_number = ? AND status NOT IN ('ready', 'failed') LIMIT 1`,
+    )
+    .get(repoFullName, prNumber);
+  return !!row;
 }
 
 export function hasActiveRun(clickupId: string): boolean {
@@ -105,6 +168,29 @@ export function initDb(): Database.Database {
   return _db;
 }
 
+export function insertReviewRun(data: {
+  pr_branch: string;
+  pr_number: number;
+  pr_title: string;
+  pr_url: string;
+  repo_full_name: string;
+}): number {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `INSERT INTO review_runs (repo_full_name, pr_number, pr_title, pr_url, pr_branch)
+       VALUES (?, ?, ?, ?, ?)`,
+    )
+    .run(
+      data.repo_full_name,
+      data.pr_number,
+      data.pr_title,
+      data.pr_url,
+      data.pr_branch,
+    );
+  return Number(result.lastInsertRowid);
+}
+
 export function insertRun(clickupId: string, repoUrl: string): number {
   const db = getDb();
   const result = db
@@ -118,6 +204,41 @@ export function listRepos(): ClonedRepo[] {
   return db
     .prepare(`SELECT * FROM cloned_repos ORDER BY last_used_at DESC`)
     .all() as ClonedRepo[];
+}
+
+export function listReviewRuns(options?: {
+  limit?: number;
+  offset?: number;
+  status?: string;
+}): { rows: ReviewRun[]; total: number } {
+  const db = getDb();
+  const conditions: string[] = [];
+  const params: unknown[] = [];
+
+  if (options?.status) {
+    conditions.push("status = ?");
+    params.push(options.status);
+  }
+
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+
+  const total = (
+    db
+      .prepare(`SELECT COUNT(*) as count FROM review_runs ${where}`)
+      .get(...params) as { count: number }
+  ).count;
+
+  const limit = options?.limit ?? 50;
+  const offset = options?.offset ?? 0;
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM review_runs ${where} ORDER BY id DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as ReviewRun[];
+
+  return { rows, total };
 }
 
 export function listRuns(options?: {
@@ -134,10 +255,13 @@ export function listRuns(options?: {
     params.push(options.status);
   }
 
-  const where = conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
+  const where =
+    conditions.length > 0 ? `WHERE ${conditions.join(" AND ")}` : "";
 
   const total = (
-    db.prepare(`SELECT COUNT(*) as count FROM task_runs ${where}`).get(...params) as {
+    db
+      .prepare(`SELECT COUNT(*) as count FROM task_runs ${where}`)
+      .get(...params) as {
       count: number;
     }
   ).count;
@@ -154,6 +278,21 @@ export function listRuns(options?: {
   return { rows, total };
 }
 
+export function markStaleReviewsAsFailed() {
+  const db = getDb();
+  const result = db
+    .prepare(
+      `UPDATE review_runs
+       SET status = 'failed', error_message = 'Process restarted', updated_at = datetime('now')
+       WHERE status NOT IN ('ready', 'failed')`,
+    )
+    .run();
+
+  if (result.changes > 0) {
+    log.warn({ count: result.changes }, "Marked stale reviews as failed");
+  }
+}
+
 export function markStaleRunsAsFailed() {
   const db = getDb();
   const result = db
@@ -167,6 +306,30 @@ export function markStaleRunsAsFailed() {
   if (result.changes > 0) {
     log.warn({ count: result.changes }, "Marked stale runs as failed");
   }
+}
+
+export function updateReviewRun(
+  id: number,
+  updates: Partial<
+    Pick<
+      ReviewRun,
+      "comment_count" | "cost_usd" | "error_message" | "review_id" | "status"
+    >
+  >,
+) {
+  const db = getDb();
+  const sets: string[] = ["updated_at = datetime('now')"];
+  const values: unknown[] = [];
+
+  for (const [key, value] of Object.entries(updates)) {
+    sets.push(`${key} = ?`);
+    values.push(value);
+  }
+  values.push(id);
+
+  db.prepare(`UPDATE review_runs SET ${sets.join(", ")} WHERE id = ?`).run(
+    ...values,
+  );
 }
 
 export function updateRun(
@@ -193,7 +356,11 @@ export function updateRun(
   );
 }
 
-export function upsertRepo(repoUrl: string, diskPath: string, sizeBytes: null | number): void {
+export function upsertRepo(
+  repoUrl: string,
+  diskPath: string,
+  sizeBytes: null | number,
+): void {
   const db = getDb();
   db.prepare(
     `INSERT INTO cloned_repos (repo_url, disk_path, size_bytes)
@@ -220,6 +387,24 @@ function migrate(db: Database.Database) {
     );
     CREATE INDEX IF NOT EXISTS idx_task_runs_clickup_id ON task_runs(clickup_id);
     CREATE INDEX IF NOT EXISTS idx_task_runs_status ON task_runs(status);
+
+    CREATE TABLE IF NOT EXISTS review_runs (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      repo_full_name  TEXT NOT NULL,
+      pr_number       INTEGER NOT NULL,
+      pr_title        TEXT NOT NULL,
+      pr_url          TEXT NOT NULL,
+      pr_branch       TEXT NOT NULL,
+      status          TEXT NOT NULL DEFAULT 'queued',
+      error_message   TEXT,
+      cost_usd        REAL,
+      review_id       INTEGER,
+      comment_count   INTEGER DEFAULT 0,
+      started_at      TEXT DEFAULT (datetime('now')),
+      updated_at      TEXT DEFAULT (datetime('now'))
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_review_runs_pr
+      ON review_runs(repo_full_name, pr_number);
 
     CREATE TABLE IF NOT EXISTS cloned_repos (
       id              INTEGER PRIMARY KEY AUTOINCREMENT,
