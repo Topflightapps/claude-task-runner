@@ -9,15 +9,15 @@ import { enqueueReview } from "./queue.js";
 const execFileAsync = promisify(execFile);
 const log = createChildLogger("review-sync");
 
+interface GHPRDetail {
+  headRefName: string;
+}
+
 interface GHSearchResult {
   number: number;
   repository: { nameWithOwner: string };
   title: string;
   url: string;
-}
-
-interface GHPRDetail {
-  headRefName: string;
 }
 
 export async function syncPendingReviews(): Promise<number> {

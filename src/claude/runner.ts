@@ -26,6 +26,57 @@ export interface ClaudeResult {
  */
 // stream-json events are loosely typed — we parse what we recognize
 
+export function extractStreamLine(
+  event: Record<string, unknown>,
+): null | string {
+  const type = typeof event.type === "string" ? event.type : "";
+
+  // assistant — extract text content from message
+  if (type === "assistant") {
+    const msg = event.message as
+      | undefined
+      | { content?: { name?: string; text?: string; type?: string }[] };
+    if (msg?.content) {
+      const parts: string[] = [];
+      for (const block of msg.content) {
+        if (block.type === "text" && block.text) {
+          parts.push(block.text);
+        } else if (block.type === "tool_use" && block.name) {
+          parts.push(`[tool: ${block.name}]`);
+        }
+      }
+      if (parts.length) return parts.join("");
+    }
+    return null;
+  }
+
+  // content block delta
+  if (type === "content_block_delta") {
+    const block = event.content_block as undefined | { text?: string };
+    if (block?.text) return block.text;
+  }
+
+  // result
+  if (type === "result") {
+    return typeof event.result === "string" ? event.result : null;
+  }
+
+  // system messages
+  if (type === "system") {
+    const msg = typeof event.message === "string" ? event.message : null;
+    if (msg) return `[system] ${msg}`;
+    return null;
+  }
+
+  // user messages (tool results) — skip, not useful in output
+  if (type === "user") return null;
+
+  // rate limit events — skip
+  if (type === "rate_limit_event") return null;
+
+  return null;
+}
+
 /**
  * Run Claude Code headlessly with a prompt string.
  * Used for the kickoff phase (generating prd.json).
@@ -183,57 +234,6 @@ export async function runRalphLoop(
       });
     });
   });
-}
-
-export function extractStreamLine(
-  event: Record<string, unknown>,
-): null | string {
-  const type = typeof event.type === "string" ? event.type : "";
-
-  // assistant — extract text content from message
-  if (type === "assistant") {
-    const msg = event.message as
-      | undefined
-      | { content?: { text?: string; type?: string; name?: string }[] };
-    if (msg?.content) {
-      const parts: string[] = [];
-      for (const block of msg.content) {
-        if (block.type === "text" && block.text) {
-          parts.push(block.text);
-        } else if (block.type === "tool_use" && block.name) {
-          parts.push(`[tool: ${block.name}]`);
-        }
-      }
-      if (parts.length) return parts.join("");
-    }
-    return null;
-  }
-
-  // content block delta
-  if (type === "content_block_delta") {
-    const block = event.content_block as undefined | { text?: string };
-    if (block?.text) return block.text;
-  }
-
-  // result
-  if (type === "result") {
-    return typeof event.result === "string" ? event.result : null;
-  }
-
-  // system messages
-  if (type === "system") {
-    const msg = typeof event.message === "string" ? event.message : null;
-    if (msg) return `[system] ${msg}`;
-    return null;
-  }
-
-  // user messages (tool results) — skip, not useful in output
-  if (type === "user") return null;
-
-  // rate limit events — skip
-  if (type === "rate_limit_event") return null;
-
-  return null;
 }
 
 function spawnClaudeProcess(

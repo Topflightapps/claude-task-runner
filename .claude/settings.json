@@ -1,5 +1,6 @@
 {
   "enabledPlugins": {
-    "buildwright-plugin@buildwright": true
+    "buildwright-plugin@buildwright": true,
+    "code-review@claude-plugins-official": true
   }
 }

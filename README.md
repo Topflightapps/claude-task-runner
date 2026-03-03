@@ -6,17 +6,16 @@ Automated pipeline that receives ClickUp webhooks, runs Claude Code headlessly o
 
 Powered by the [Ralph autonomous agent loop](https://github.com/snarktank/ralph) and the [Buildwright plugin](https://github.com/jguerena15/buildwright-plugin).
 
-Currently supports Next.js projects. Designed to run on a Linux VPS or Docker container.
+Currently supports Next.js projects. Designed to run on Railway, a Linux VPS, or Docker container.
 
 ---
 
 ## Table of Contents
 
-- [Prerequisites](#prerequisites)
-- [Quick Start](#quick-start)
-- [Setup Script](#setup-script)
-- [Configuration](#configuration)
+- [Deploy to Railway (Recommended)](#deploy-to-railway-recommended)
+- [Environment Variables](#environment-variables)
 - [ClickUp Setup](#clickup-setup)
+- [Claude Authentication](#claude-authentication)
 - [Running Locally](#running-locally)
 - [Running with Docker](#running-with-docker)
 - [How It Works](#how-it-works)
@@ -28,28 +27,206 @@ Currently supports Next.js projects. Designed to run on a Linux VPS or Docker co
 - [Prompt Generation](#prompt-generation)
 - [Error Handling](#error-handling)
 - [MCP Integrations](#mcp-integrations)
+- [Admin Dashboard](#admin-dashboard)
 - [Development](#development)
 - [Testing](#testing)
 - [Troubleshooting](#troubleshooting)
 
 ---
 
-## Prerequisites
+## Deploy to Railway (Recommended)
+
+The fastest way to get started is a one-click deploy to Railway:
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_CODE)
+
+<!-- TODO: Replace TEMPLATE_CODE above with your actual template code after publishing at https://railway.com/account/templates -->
+
+### What you get
+
+- Pre-built Docker image with Node.js 22, git, gh CLI, Claude Code CLI, and Playwright + Chromium
+- Persistent volume for database, cloned repos, and Claude auth tokens
+- Auto-restart on failure with health checks
+- Public URL for ClickUp/GitHub webhooks
+
+### Step-by-step Railway setup
+
+1. **Click the deploy button** above and connect your GitHub account
+2. **Fill in the environment variables** (see [Environment Variables](#environment-variables) below)
+3. **Wait for the build** — first deploy takes ~5 minutes due to Playwright/Chromium install
+4. **Add a volume** — In Railway, go to your service → Settings → Volumes → Mount a volume at `/data`. This persists your database, cloned repos, and Claude auth tokens across deploys.
+5. **Get your public URL** — Go to Settings → Networking → Generate Domain. This is your webhook URL.
+6. **Register your ClickUp webhook** — Point it to `https://your-app.up.railway.app/webhook` (see [ClickUp Setup](#clickup-setup))
+7. **Authenticate Claude** (if using Claude Max/Pro instead of API key) — see [Claude Authentication](#claude-authentication)
+
+### Adding a volume
+
+Railway volumes persist data across redeploys. You **must** attach one:
+
+1. Open your service in the Railway dashboard
+2. Go to **Settings → Volumes**
+3. Click **Add Volume**
+4. Set mount path to `/data`
+5. Click **Create**
+
+This single volume stores:
+- `/data/db/` — SQLite database (run history, crash recovery)
+- `/data/repos/` — Cloned git repositories
+- `/data/claude/` — Claude CLI auth tokens (persists `claude login`)
+
+---
+
+## Environment Variables
+
+All configuration is via environment variables, validated at startup with Zod. The process will fail fast if any required values are missing.
+
+### Required
+
+| Variable | Description |
+| --- | --- |
+| `CLICKUP_API_TOKEN` | ClickUp personal API token (`pk_...`). Get it from ClickUp → Settings → Apps. |
+| `CLICKUP_TEAM_ID` | Your ClickUp team/workspace ID. Found in the URL: `app.clickup.com/{team_id}/...` |
+| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user. Assignment to this user triggers task pickup. Find it via the ClickUp API or `pnpm setup`. |
+| `CLICKUP_REPO_FIELD_ID` | ID of your "GitHub Repo" custom field (URL type). The runner reads this field to know which repo to clone. Find it via the ClickUp API or `pnpm setup`. |
+| `WEBHOOK_SECRET` | Shared secret for verifying ClickUp webhook signatures (HMAC-SHA256). Generate one with `openssl rand -hex 32`. Must match what you register with ClickUp. |
+| `GITHUB_TOKEN` | GitHub personal access token with `repo` scope. Used for cloning, pushing, and creating PRs. Create at github.com → Settings → Developer settings → Personal access tokens. |
+
+### Optional
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `ANTHROPIC_API_KEY` | — | Anthropic API key for pay-per-use Claude. Not needed if you use `claude login` with a Max/Pro subscription. Get one at [console.anthropic.com](https://console.anthropic.com). |
+| `WEBHOOK_PORT` | `3000` | Port for the webhook HTTP server. Railway sets `PORT` automatically — the Dockerfile exposes 3000. |
+| `WORK_DIR` | `/tmp/claude-task-runner/repos` | Directory where repos are cloned. On Railway, this is overridden to `/data/repos` via the Dockerfile. |
+| `DB_PATH` | `./data/task-runner.db` | SQLite database file path. On Railway, this is overridden to `/data/db/task-runner.db` via the Dockerfile. |
+| `CLAUDE_MAX_TURNS` | `50` | Max agentic turns per Claude Code run. Higher = more thorough but slower/costlier. |
+| `FIGMA_MCP_TOKEN` | — | Figma MCP token for design-to-code tasks. Include Figma URLs in your ClickUp task description and the runner auto-detects them. |
+| `GITHUB_PR_ASSIGNEE` | — | GitHub username to auto-assign created PRs to. |
+| `GITHUB_USERNAME` | — | Your GitHub username. Enables the PR review pipeline when set alongside `GITHUB_WEBHOOK_SECRET`. |
+| `GITHUB_WEBHOOK_SECRET` | — | Secret for GitHub webhook signature verification. Enables automated PR reviews when set alongside `GITHUB_USERNAME`. |
+| `REVIEW_TIMEOUT_MS` | `900000` (15 min) | Timeout for the PR review phase. |
+| `SLACK_BOT_TOKEN` | — | Slack bot token (`xoxb-...`) for DM notifications when tasks complete or reviews are ready. |
+| `SLACK_USER_ID` | — | Your Slack user ID for receiving DM notifications. |
+| `ADMIN_PASSWORD` | — | Password to protect the admin dashboard. Leave empty to disable the dashboard. |
+
+---
+
+## ClickUp Setup
+
+### 1. Create a "Claude" User
+
+Create a dedicated ClickUp user (e.g., "Claude") that will act as the trigger. When you assign a task to this user, the webhook fires and the runner picks it up.
+
+### 2. Create the "GitHub Repo" Custom Field
+
+In your ClickUp space, create a custom field:
+- **Name:** "GitHub Repo"
+- **Type:** URL
+- **Value:** Full GitHub repo URL (e.g., `https://github.com/yourorg/your-next-app`)
+
+### 3. Register a Webhook
+
+Point your ClickUp webhook to your Railway URL:
+
+```
+POST https://api.clickup.com/api/v2/team/{team_id}/webhook
+{
+  "endpoint": "https://your-app.up.railway.app/webhook",
+  "events": ["taskAssigneeUpdated"],
+  "secret": "your-webhook-secret"
+}
+```
+
+Or run `pnpm setup` locally to auto-register it.
+
+### 4. Task Requirements
+
+For the runner to pick up a task:
+- **Assigned** to the "Claude" user (matching `CLICKUP_CLAUDE_USER_ID`)
+- Has a valid **"GitHub Repo"** URL in the custom field
+- **Not** already processed (tracked in SQLite)
+
+Tasks are processed one at a time. Concurrent webhooks are queued.
+
+### 5. Task Content Tips
+
+For best results:
+- Clear, descriptive **task name** (becomes the PR title)
+- Detailed **description** in markdown (Claude's primary instruction)
+- **Checklists** for acceptance criteria
+- **Figma URLs** in the description (auto-detected for design-to-code)
+
+---
+
+## Claude Authentication
+
+Claude Task Runner needs access to Claude Code. You have two options:
+
+### Option A: API Key (Simplest)
+
+Set `ANTHROPIC_API_KEY` in your environment variables. This is pay-per-use billing through [console.anthropic.com](https://console.anthropic.com).
+
+No SSH or manual setup required — just add the env var and deploy.
+
+### Option B: Claude Max/Pro Subscription (SSH into Railway)
+
+If you have a Claude Max or Pro subscription and want to use `claude login` instead of an API key:
+
+1. **Deploy first** — make sure the service is running on Railway
+2. **SSH into your Railway service:**
+
+   ```bash
+   # Install Railway CLI if you haven't
+   npm install -g @railway/cli
+
+   # Login to Railway
+   railway login
+
+   # Link to your project
+   railway link
+
+   # SSH into the running service
+   railway shell
+   ```
+
+3. **Inside the Railway shell, run:**
+
+   ```bash
+   # The entrypoint already creates the claude user and .claude directory
+   # Just switch to the claude user and login
+   su claude
+   claude login
+   ```
+
+4. **Follow the OAuth prompts** — Claude will give you a URL to visit in your browser. Authenticate and the tokens are saved to `/data/claude/` (persisted across deploys via the volume).
+
+5. **Verify it worked:**
+
+   ```bash
+   claude --version
+   ```
+
+6. **Exit and restart the service** — the tokens persist in the `/data` volume.
+
+> **Note:** The entrypoint script automatically creates the `claude` user, sets up `/home/claude/.claude`, and symlinks it to `/data/claude` on the persistent volume. You do NOT need to manually create directories.
+
+---
+
+## Running Locally
+
+### Prerequisites
 
 - **Node.js 22+**
 - **pnpm 10.11+** (`corepack enable && corepack prepare pnpm@10.11.0 --activate`)
-- **git** and **gh** CLI (GitHub CLI) installed and authenticated
-- **Claude Code CLI** installed globally: `npm install -g @anthropic-ai/claude-code`
-- A **ClickUp** account with API access
-- A **GitHub** account with a personal access token
-- **Claude Code CLI** authenticated via one of:
-  - `claude login` (uses your Claude Max/Pro subscription — run once on the server, tokens persist in `~/.claude/`)
-  - `ANTHROPIC_API_KEY` env var (pay-per-use via [console.anthropic.com](https://console.anthropic.com))
+- **git** and **gh** CLI installed and authenticated
+- **Claude Code CLI**: `npm install -g @anthropic-ai/claude-code`
+- Claude Code authenticated via `claude login` or `ANTHROPIC_API_KEY` env var
 
-## Quick Start
+### Quick Start
 
 ```bash
 # Clone and install
+git clone https://github.com/Topflightapps/claude-task-runner.git
 cd claude-task-runner
 pnpm install
 
@@ -60,7 +237,7 @@ pnpm setup
 pnpm dev
 ```
 
-## Setup Script
+### Setup Script
 
 The interactive setup script walks you through generating a `.env` file:
 
@@ -69,7 +246,6 @@ pnpm setup
 ```
 
 It will:
-
 1. Prompt for your **ClickUp API token**
 2. Fetch your ClickUp teams and let you pick one
 3. List team members so you can select the "Claude" user
@@ -79,93 +255,11 @@ It will:
 7. Optionally collect a **Figma MCP token**
 8. Write everything to a `.env` file
 
-If any fields can't be auto-detected, it will ask you to paste the field ID manually.
-
-## Configuration
-
-All configuration is via environment variables, validated at startup with Zod. The process will fail fast if any required values are missing.
-
-Copy `.env.example` to `.env` and fill in your values:
-
-```bash
-cp .env.example .env
-```
-
-### Required Variables
-
-| Variable                 | Description                                                              |
-| ------------------------ | ------------------------------------------------------------------------ |
-| `CLICKUP_API_TOKEN`      | ClickUp personal API token (`pk_...`)                                    |
-| `CLICKUP_TEAM_ID`        | Your ClickUp team/workspace ID                                           |
-| `CLICKUP_CLAUDE_USER_ID` | ClickUp user ID for the "Claude" user — assignment triggers task pickup  |
-| `CLICKUP_REPO_FIELD_ID`  | ID of the "GitHub Repo" custom field (URL type)                          |
-| `WEBHOOK_SECRET`         | Shared secret for verifying ClickUp webhook signatures (HMAC-SHA256)     |
-| `GITHUB_TOKEN`           | GitHub personal access token with `repo` scope                           |
-
-### Optional Variables (with defaults)
-
-| Variable           | Default                         | Description                              |
-| ------------------ | ------------------------------- | ---------------------------------------- |
-| `ANTHROPIC_API_KEY` | —                              | Anthropic API key (if not using `claude login` OAuth) |
-| `WEBHOOK_PORT`     | `3000`                          | Port for the webhook HTTP server         |
-| `WORK_DIR`         | `/tmp/claude-task-runner/repos` | Directory where repos are cloned         |
-| `DB_PATH`          | `./data/task-runner.db`         | SQLite database file path                |
-| `CLAUDE_MAX_TURNS` | `50`                            | Max agentic turns per Claude run         |
-| `FIGMA_MCP_TOKEN`  | —                               | Figma MCP token for design-to-code tasks |
-
-## ClickUp Setup
-
-### 1. Create a "Claude" User
-
-Create a dedicated ClickUp user (e.g., "Claude") that will be used as the trigger. When you assign a task to this user, the webhook fires and the runner picks it up.
-
-### 2. Register a Webhook
-
-Run `pnpm setup` to auto-register, or manually register via the ClickUp API:
-
-```
-POST /api/v2/team/{team_id}/webhook
-{
-  "endpoint": "https://your-server.com/webhook",
-  "events": ["taskAssigneeUpdated"],
-  "secret": "your-webhook-secret"
-}
-```
-
-### 3. Custom Fields (workspace-level)
-
-Create this custom field in your ClickUp space:
-
-- **"GitHub Repo"** — Type: **URL**. Set this to the full GitHub repo URL (e.g., `https://github.com/yourorg/your-next-app`).
-
-### 4. Task Requirements
-
-For the runner to pick up a task, it must:
-
-- Be **assigned** to the "Claude" user (matching `CLICKUP_CLAUDE_USER_ID`)
-- Have a valid **"GitHub Repo"** URL in the custom field
-- **Not** have already been processed (tracked in SQLite)
-
-Tasks are processed **one at a time**. If a webhook arrives while a task is running, it is queued and processed when the current task finishes.
-
-### 3. Task Content Tips
-
-For best results, write your ClickUp tasks with:
-
-- A clear, descriptive **task name** (becomes the PR title)
-- A detailed **description** in markdown (becomes Claude's primary instruction)
-- **Checklists** for acceptance criteria (converted to a checklist in the prompt)
-- **Figma URLs** in the description or a custom field (auto-detected and passed to Figma MCP)
-
-## Running Locally
-
 ### Development (hot reload)
 
 ```bash
 pnpm dev
 ```
-
-Uses `tsx --watch` to recompile on file changes. Loads `.env` automatically.
 
 ### Production
 
@@ -174,7 +268,7 @@ pnpm build
 pnpm start
 ```
 
-Compiles TypeScript to `dist/` and runs with Node.js directly.
+---
 
 ## Running with Docker
 
@@ -184,49 +278,32 @@ Compiles TypeScript to `dist/` and runs with Node.js directly.
 docker compose up -d
 ```
 
-This builds the Docker image (Node.js 22, git, gh CLI, Claude Code CLI, Playwright + Chromium) and starts the runner.
-
-### What the Docker image includes
-
-- Node.js 22 (slim)
-- git + gh CLI
-- Claude Code CLI (`@anthropic-ai/claude-code`)
-- Playwright with Chromium (for browser verification via MCP)
-- pnpm 10.11
-
-### Claude Code Authentication
-
-If using a Claude Max/Pro subscription instead of an API key, you need to authenticate once:
+### Claude Code Authentication (Docker)
 
 ```bash
-# Option 1: Run claude login inside the container
-docker compose exec runner claude login
-
-# Option 2: Mount your local auth credentials
-# Add to docker-compose.yml volumes:
-#   - ~/.claude:/root/.claude
+# Run claude login inside the container
+docker compose exec runner su claude -c "claude login"
 ```
 
-If using an API key instead, just set `ANTHROPIC_API_KEY` in your `.env` file.
+Or set `ANTHROPIC_API_KEY` in your `.env` file.
 
 ### Persistent volumes
 
-| Volume         | Mount    | Purpose                                       |
-| -------------- | -------- | --------------------------------------------- |
-| `runner-data`  | `/data`  | SQLite database (crash recovery, run history) |
-| `runner-repos` | `/repos` | Cloned git repositories                       |
+| Volume | Mount | Purpose |
+| --- | --- | --- |
+| `runner-data` | `/data` | SQLite database, cloned repos, Claude auth tokens |
 
-### View logs
+### Commands
 
 ```bash
+# View logs
 docker compose logs -f runner
-```
 
-### Rebuild after code changes
-
-```bash
+# Rebuild after code changes
 docker compose up -d --build
 ```
+
+---
 
 ## How It Works
 
@@ -244,7 +321,7 @@ The runner is intentionally simple — one process, one task at a time (with que
 
 Every task goes through two phases:
 
-**Phase 1 — Kickoff:** A single Claude Code invocation reads the ClickUp task details, explores the codebase, and generates `scripts/ralph/prd.json` — a structured breakdown of the task into small, ordered user stories. This is the equivalent of running `/buildwright-plugin:kickoff` + `/buildwright-plugin:prd` + `/buildwright-plugin:ralph` but in one automated, non-interactive pass.
+**Phase 1 — Kickoff:** A single Claude Code invocation reads the ClickUp task details, explores the codebase, and generates `scripts/ralph/prd.json` — a structured breakdown of the task into small, ordered user stories. Timeout: 10 minutes.
 
 **Phase 2 — Ralph Loop:** The `ralph.sh` script runs in a loop, spawning a **fresh Claude Code instance per iteration**. Each iteration:
 
@@ -256,27 +333,20 @@ Every task goes through two phases:
 6. Updates `prd.json` to mark the story as `passes: true`
 7. Appends learnings to `progress.txt`
 
-The loop exits when all stories pass (`<promise>COMPLETE</promise>`) or max iterations are reached.
+The loop exits when all stories pass or max iterations are reached. Timeout: 60 minutes.
 
 ### Ralph Loop
 
-The Ralph loop files live in `scripts/ralph/` and are **copied into each target repo** at runtime:
+The Ralph loop files live in `scripts/ralph/` and are copied into each target repo at runtime:
 
-| File               | Purpose                                                    |
-| ------------------ | ---------------------------------------------------------- |
-| `ralph.sh`         | Bash loop that spawns fresh Claude instances per iteration |
-| `CLAUDE.md`        | Instructions piped to each Claude instance via stdin       |
-| `prd.json`         | Generated by Phase 1 — structured user stories             |
-| `progress.txt`     | Cross-iteration memory — learnings, patterns, gotchas      |
-| `prd.json.example` | Example format for reference                               |
+| File | Purpose |
+| --- | --- |
+| `ralph.sh` | Bash loop that spawns fresh Claude instances per iteration |
+| `CLAUDE.md` | Instructions piped to each Claude instance via stdin |
+| `prd.json` | Generated by Phase 1 — structured user stories |
+| `progress.txt` | Cross-iteration memory — learnings, patterns, gotchas |
 
-**Key design principle:** Each Ralph iteration gets a fresh context window. Memory between iterations is maintained only through:
-
-- **Git commits** — the code itself
-- **progress.txt** — learnings and patterns from previous iterations
-- **prd.json** — which stories are done vs remaining
-
-This prevents context degradation and ensures each iteration starts clean.
+**Key design principle:** Each Ralph iteration gets a fresh context window. Memory between iterations is maintained only through git commits, `progress.txt`, and `prd.json`.
 
 #### prd.json Format
 
@@ -303,18 +373,7 @@ This prevents context degradation and ensures each iteration starts clean.
 }
 ```
 
-#### Story Sizing Rules
-
-Each story must be completable in **one context window** (one Claude iteration). Rules:
-
-- **Right-sized:** "Add a DB column", "Create a UI component", "Add a filter dropdown"
-- **Too big (split these):** "Build entire dashboard", "Add authentication", "Refactor the API"
-- **Rule of thumb:** If you can't describe the change in 2-3 sentences, it's too big
-- **Dependency order:** Schema first → backend logic → UI components → summary views
-
 ### Task Lifecycle
-
-Each task goes through these states:
 
 ```
 CLAIMED         → Updates ClickUp status to "in progress", posts a comment, inserts DB row
@@ -331,160 +390,104 @@ DONE            → Updates ClickUp to "in review", posts PR link comment, un-as
 On any error → FAILED: posts error details as ClickUp comment, updates DB
 ```
 
-### Branch Naming
-
-Branches are created as: `claude/{clickupId}-{slugified-task-name}`
-
-For example, a task named "Add login page" with ID `abc123` becomes: `claude/abc123-add-login-page`
-
 ### Database
 
-SQLite database (`better-sqlite3`) with WAL mode. Single table `task_runs`:
+SQLite (`better-sqlite3`) with WAL mode. Tables:
 
-| Column          | Type    | Description                   |
-| --------------- | ------- | ----------------------------- |
-| `id`            | INTEGER | Auto-incrementing primary key |
-| `clickup_id`    | TEXT    | ClickUp task ID               |
-| `status`        | TEXT    | Current lifecycle state       |
-| `repo_url`      | TEXT    | GitHub repo URL               |
-| `branch_name`   | TEXT    | Git branch created            |
-| `pr_url`        | TEXT    | Created PR URL                |
-| `error_message` | TEXT    | Error details if failed       |
-| `cost_usd`      | REAL    | Claude API cost for this run  |
-| `started_at`    | TEXT    | When the run started          |
-| `updated_at`    | TEXT    | Last status update            |
+- **task_runs** — One record per task execution (status, repo, branch, PR URL, cost, timestamps)
+- **review_runs** — PR review tracking
+- **cloned_repos** — Cache of cloned repositories
 
-Used for:
-
-- **Duplicate prevention** — won't re-process a task that already has an active or completed run
-- **Crash recovery** — on startup, any non-terminal runs (`claimed`, `cloning`, `running_claude`, `creating_pr`) are marked as `failed` with "Process restarted"
-- **Cost tracking** — records Claude API cost per task when available
+Auto-created on first run. Used for duplicate prevention, crash recovery, and cost tracking.
 
 ### Prompt Generation
 
-The prompt builder (`src/clickup/prompt-builder.ts`) generates two types of prompts:
-
-**Kickoff Prompt** (`buildKickoffPrompt`): Used in Phase 1. Includes:
-
-1. Full ClickUp task details (name, description, checklists, Figma URLs)
-2. The target branch name
-3. Instructions to explore the codebase and generate `scripts/ralph/prd.json`
-4. Story sizing rules, dependency ordering, and prd.json format spec
-5. Explicit instruction to NOT implement anything — only generate the plan
-
-**Direct Prompt** (`buildDirectPrompt`): Available for simple single-story tasks. Includes standard implementation instructions with `TASK_COMPLETE` completion signal.
-
-The kickoff prompt tells Claude to output `TASK_COMPLETE` when prd.json is written. The Ralph loop uses `<promise>COMPLETE</promise>` as its completion signal (checked by `ralph.sh`).
+The prompt builder (`src/clickup/prompt-builder.ts`) generates detailed prompts from ClickUp task data, including task name, description, checklists (as acceptance criteria), and auto-detected Figma URLs.
 
 ### Error Handling
 
-| Scenario                    | Behavior                                                                             |
-| --------------------------- | ------------------------------------------------------------------------------------ |
-| **Process crash/restart**   | On startup, all non-terminal DB rows are marked `failed` with "Process restarted"    |
-| **Kickoff timeout**         | 10-minute timeout for Phase 1 (prd.json generation). Task marked `failed`.           |
-| **Ralph loop timeout**      | 60-minute timeout for Phase 2 (story implementation). Task marked `failed`.          |
-| **Ralph max iterations**    | If all stories aren't complete after max iterations, task marked `failed`.           |
-| **Claude doesn't complete** | If kickoff output doesn't contain `TASK_COMPLETE`, task is marked `failed`           |
-| **Missing repo URL**        | Task skipped, comment posted to ClickUp asking to add the URL                        |
-| **ClickUp API errors**      | Rate-limited to 90 req/min (under 100 free-tier limit) via `p-throttle`              |
-| **Git dirty state**         | `git reset --hard origin/main` before each task (safe — working dir is runner-owned) |
-| **Duplicate tasks**         | DB check prevents re-processing; Claude user un-assigned after completion            |
-| **Any unhandled error**     | Error message posted as ClickUp comment, task marked `failed` in DB                  |
+| Scenario | Behavior |
+| --- | --- |
+| Process crash/restart | Non-terminal DB rows marked `failed` with "Process restarted" |
+| Kickoff timeout | 10-minute timeout. Task marked `failed`. |
+| Ralph loop timeout | 60-minute timeout. Task marked `failed`. |
+| Missing repo URL | Task skipped, comment posted to ClickUp |
+| ClickUp API errors | Rate-limited to 90 req/min via `p-throttle` |
+| Duplicate tasks | DB check prevents re-processing |
+| Any unhandled error | Error posted as ClickUp comment, task marked `failed` |
 
 ### MCP Integrations
 
-The runner is designed to work with MCP servers that Claude Code supports:
+- **Playwright MCP** — browser-based verification of UI changes (Chromium pre-installed)
+- **Figma MCP** — design-to-code tasks (set `FIGMA_MCP_TOKEN`, include Figma URLs in task description)
 
-- **Playwright MCP** — for browser-based verification of UI changes. Chromium is installed in the Docker image.
-- **Figma MCP** — for design-to-code tasks. Set `FIGMA_MCP_TOKEN` and include Figma URLs in your ClickUp task description. The prompt builder auto-detects Figma URLs and instructs Claude to use the MCP to extract exact design specs.
+Configure MCP servers in each target repo's `.mcp.json` file.
 
-Configure MCP servers in each target repo's `.mcp.json` file so Claude Code picks them up automatically.
+---
+
+## Admin Dashboard
+
+The runner includes a web-based admin dashboard for monitoring:
+
+- Queue status and active/completed runs
+- Real-time logs via WebSocket
+- Cloned repos cache management
+
+Access it at your service URL (e.g., `https://your-app.up.railway.app/`). Protected by `ADMIN_PASSWORD` if set.
+
+---
 
 ## Development
 
 ### Scripts
 
-| Command             | Description                                     |
-| ------------------- | ----------------------------------------------- |
-| `pnpm dev`          | Start with hot reload (tsx --watch), loads .env |
-| `pnpm build`        | Compile TypeScript to dist/                     |
-| `pnpm start`        | Run compiled output (production)                |
-| `pnpm setup`        | Interactive .env file generator                 |
-| `pnpm type-check`   | TypeScript type checking (no emit)              |
-| `pnpm lint`         | Run ESLint                                      |
-| `pnpm lint:fix`     | Run ESLint with auto-fix                        |
-| `pnpm format`       | Format all files with Prettier                  |
-| `pnpm format:check` | Check formatting without writing                |
-| `pnpm test`         | Run tests in watch mode (Vitest)                |
-| `pnpm test:run`     | Run tests once                                  |
-| `pnpm coverage`     | Run tests with coverage report                  |
-
-### Project Structure
-
-```
-claude-task-runner/
-  src/
-    index.ts                    Entry point — loads config, inits DB, starts webhook server
-    config.ts                   Zod-validated environment config
-    db.ts                       SQLite setup, migrations, queries
-    logger.ts                   Pino structured JSON logger
-    webhook.ts                  HTTP server — receives ClickUp webhooks, queues tasks
-    executor.ts                 Orchestrates the full task lifecycle
-    clickup/
-      client.ts                 ClickUp API v2 wrapper (rate-limited with p-throttle)
-      types.ts                  TypeScript types for ClickUp API responses
-      prompt-builder.ts         Converts ClickUp card → Claude prompt
-    github/
-      manager.ts                Git + gh CLI operations (clone, branch, commit, push, PR)
-    claude/
-      runner.ts                 Claude Code CLI subprocess execution
-  scripts/
-    setup.ts                    Interactive setup script
-    ralph/
-      ralph.sh                  Bash loop — spawns fresh Claude per iteration
-      CLAUDE.md                 Instructions for each Ralph iteration
-      prd.json.example          Example prd.json format
-  Dockerfile
-  docker-compose.yml
-  package.json
-  tsconfig.json
-  tsconfig.build.json
-  eslint.config.js
-  vitest.config.ts
-  .prettierrc
-  .env.example
-```
+| Command | Description |
+| --- | --- |
+| `pnpm dev` | Start with hot reload (tsx --watch), loads .env |
+| `pnpm dev:admin` | Run both backend and web frontend in parallel |
+| `pnpm build` | Compile TypeScript to dist/ |
+| `pnpm start` | Run compiled output (production) |
+| `pnpm setup` | Interactive .env file generator |
+| `pnpm type-check` | TypeScript type checking (no emit) |
+| `pnpm lint` | Run ESLint |
+| `pnpm lint:fix` | Run ESLint with auto-fix |
+| `pnpm format` | Format all files with Prettier |
+| `pnpm format:check` | Check formatting without writing |
+| `pnpm test` | Run tests in watch mode (Vitest) |
+| `pnpm test:run` | Run tests once |
+| `pnpm coverage` | Run tests with coverage report |
 
 ### Tooling
 
 - **Runtime**: Node.js 22 (ESM)
 - **Package manager**: pnpm 10.11
 - **TypeScript**: Strict mode, extends `@tsconfig/node22`
-- **Linting**: ESLint 9 with `typescript-eslint` (strict + stylistic) and `eslint-plugin-perfectionist` for import/object sorting
-- **Formatting**: Prettier (defaults)
-- **Testing**: Vitest with globals enabled and v8 coverage
-- **Pre-commit hooks**: Husky + lint-staged (auto-lint and format on commit)
+- **Linting**: ESLint 9 with `typescript-eslint`
+- **Formatting**: Prettier
+- **Testing**: Vitest with v8 coverage
+- **Pre-commit hooks**: Husky + lint-staged
 
 ### Dependencies
 
-| Package          | Purpose                                             |
-| ---------------- | --------------------------------------------------- |
+| Package | Purpose |
+| --- | --- |
 | `better-sqlite3` | SQLite database for run tracking and crash recovery |
-| `p-throttle`     | Rate limiting for ClickUp API calls (90 req/min)    |
-| `pino`           | Structured JSON logging                             |
-| `zod`            | Environment variable validation                     |
+| `p-throttle` | Rate limiting for ClickUp API calls (90 req/min) |
+| `pino` | Structured JSON logging |
+| `ws` | WebSocket for real-time admin updates |
+| `zod` | Environment variable validation |
 
-External CLIs (must be installed):
+External CLIs (pre-installed in Docker/Railway):
 
-| CLI      | Purpose                        |
-| -------- | ------------------------------ |
-| `git`    | Repository operations          |
-| `gh`     | GitHub PR creation             |
+| CLI | Purpose |
+| --- | --- |
+| `git` | Repository operations |
+| `gh` | GitHub PR creation |
 | `claude` | Claude Code headless execution |
 
-## Testing
+---
 
-### Run tests
+## Testing
 
 ```bash
 # Watch mode
@@ -499,109 +502,55 @@ pnpm coverage
 
 ### Integration testing (manual)
 
-To test the full pipeline end-to-end:
+1. Set up a test repo on GitHub
+2. Create a ClickUp task with "GitHub Repo" field pointing to your test repo
+3. Give it a simple description like "Add a hello world page at /hello"
+4. Assign it to the "Claude" user
+5. Watch the logs for the full lifecycle
 
-1. **Set up a test repo**: Create a simple Next.js repo on GitHub that you can safely push branches to.
-
-2. **Create a ClickUp task**:
-   - Set "GitHub Repo" to your test repo URL
-   - Give it a simple description like "Add a hello world page at /hello that displays 'Hello, World!'"
-   - Assign it to the "Claude" user to trigger the webhook
-
-3. **Start the runner**:
-
-   ```bash
-   pnpm dev
-   ```
-
-4. **Watch the logs** — you should see:
-   - "Webhook server listening" with port
-   - "Claude user assigned — enqueuing task"
-   - "Starting task execution"
-   - "Cloning repo" / "Repo exists, fetching latest"
-   - "Starting Claude Code (kickoff)" — Phase 1 generating prd.json
-   - "Kickoff complete, prd.json generated"
-   - "Starting Ralph loop" — Phase 2 implementing stories
-   - "Ralph Iteration 1 of N"
-   - "Ralph completed all tasks!" (or iteration progress)
-   - "Created PR"
-   - "Task completed successfully"
-
-5. **Verify**:
-   - A PR was created on the test repo
-   - The ClickUp task status changed to "in review"
-   - A comment was posted on the ClickUp task with the PR link
-   - The Claude user was un-assigned from the task
-
-### Testing crash recovery
-
-1. Start the runner and let it pick up a task
-2. Kill the process mid-execution (`Ctrl+C` or `kill`)
-3. Restart the runner
-4. Check the logs for "Marked stale runs as failed" — the interrupted run should be cleaned up
-5. Re-assign the Claude user to the task — the webhook should fire again and the runner can re-process
-
-### Testing edge cases
-
-- **Non-assignee webhook**: Sending a webhook for a different event type → should be ignored (200 but no action)
-- **Wrong signature**: Sending a webhook with an invalid signature → should return 401
-- **Missing repo URL**: Runner should skip the task and post a comment on ClickUp asking to add the URL
-- **Already processed task**: Runner should skip it (duplicate prevention via DB check)
+---
 
 ## Troubleshooting
 
 ### "Config not loaded" error
-
-Make sure your `.env` file exists and has all required variables. Run `pnpm setup` to regenerate it.
-
-### "Database not initialized" error
-
-The `DB_PATH` directory must be writable. By default it creates `./data/task-runner.db`. Make sure the `data/` directory can be created.
+Make sure all required environment variables are set. Run `pnpm setup` locally to generate a `.env` file.
 
 ### ClickUp API 401
-
-Your `CLICKUP_API_TOKEN` is invalid or expired. Generate a new one from ClickUp Settings > Apps.
+Your `CLICKUP_API_TOKEN` is invalid or expired. Generate a new one from ClickUp → Settings → Apps.
 
 ### No tasks being picked up
-
-Check that your task meets all the requirements:
-
-- Assigned to the "Claude" user matching `CLICKUP_CLAUDE_USER_ID`
-- The webhook is registered and pointing to the correct URL
-- The `WEBHOOK_SECRET` matches what was registered with ClickUp
-- The "GitHub Repo" custom field ID in `.env` matches the actual field ID in ClickUp
-- The task hasn't already been processed (check the SQLite DB)
+- Task is assigned to the correct Claude user (`CLICKUP_CLAUDE_USER_ID`)
+- Webhook is registered and pointing to the correct URL
+- `WEBHOOK_SECRET` matches the registered secret
+- "GitHub Repo" custom field ID matches `CLICKUP_REPO_FIELD_ID`
+- Task hasn't already been processed (check admin dashboard or SQLite DB)
 
 ### Kickoff fails (Phase 1)
-
-- Check the logs for Claude's output (logged at debug level)
-- The 10-minute timeout for kickoff is in `src/claude/runner.ts` (`KICKOFF_TIMEOUT_MS`)
-- Make sure `ANTHROPIC_API_KEY` is valid and has credits
-- Verify the ClickUp task has enough detail for Claude to generate meaningful stories
+- Check logs for Claude's output
+- Verify `ANTHROPIC_API_KEY` is valid (or `claude login` was successful)
+- Ensure the ClickUp task has enough detail
 
 ### Ralph loop fails or times out (Phase 2)
-
-- The 60-minute timeout for the full loop is in `src/claude/runner.ts` (`RALPH_TIMEOUT_MS`)
-- `CLAUDE_MAX_TURNS` controls how many Ralph iterations to run (default 50)
-- Check `scripts/ralph/progress.txt` in the cloned repo for per-iteration status
-- Check `scripts/ralph/prd.json` to see which stories passed and which are still pending
-- Common cause: stories are too large for one context window — the kickoff prompt should split them smaller
+- Check `scripts/ralph/progress.txt` in the cloned repo
+- Check `scripts/ralph/prd.json` for story status
+- Stories may be too large — the kickoff should split them smaller
 
 ### gh CLI errors
+The `GITHUB_TOKEN` needs `repo` scope. The entrypoint auto-authenticates `gh` with this token.
 
-Make sure `gh` is installed and authenticated (`gh auth login`). The runner uses `GH_TOKEN` env var for auth, so the token needs `repo` scope.
+### Railway: Claude login tokens lost after redeploy
+Make sure you have a volume mounted at `/data`. The entrypoint symlinks `/home/claude/.claude` → `/data/claude/` so tokens persist.
 
 ### Logs
-
-Logs are structured JSON via Pino. In dev mode they print to stdout. Key fields:
-
-- `module` — which component logged the message (`webhook`, `executor`, `clickup`, `github`, `claude`, `db`)
-- `taskId` — ClickUp task ID (when processing a task)
-- `runId` — internal DB run ID
-- `branchName`, `prUrl` — git/GitHub details
-
-To get prettier logs in development, pipe through `pino-pretty`:
+Structured JSON via Pino. Key fields: `module`, `taskId`, `runId`, `branchName`, `prUrl`.
 
 ```bash
+# Railway logs
+railway logs
+
+# Docker logs
+docker compose logs -f runner
+
+# Local dev with pretty printing
 pnpm dev | npx pino-pretty
 ```

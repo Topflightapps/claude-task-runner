@@ -276,7 +276,7 @@ function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
   // Handle synchronize (new commits pushed) — trigger re-review if changes_requested
   if (action === "synchronize") {
     const existing = getReviewRunByPR(repo, pr.number);
-    if (existing && existing.status === "changes_requested") {
+    if (existing?.status === "changes_requested") {
       log.info(
         { prNumber: pr.number, repo, reviewId: existing.id },
         "New commits pushed — triggering re-review",
@@ -335,7 +335,7 @@ function handleGitHubReviewEvent(payload: GitHubPullRequestReviewEvent): void {
   const reviewState = payload.review.state;
 
   const existing = getReviewRunByPR(repo, prNumber);
-  if (!existing || existing.status !== "ready") {
+  if (existing?.status !== "ready") {
     log.debug({ prNumber, repo }, "No ready review to update");
     return;
   }

@@ -73,12 +73,6 @@ export function deleteCompletedReviews(): number {
   return result.changes;
 }
 
-export function deleteReviewRun(id: number): boolean {
-  const db = getDb();
-  const result = db.prepare(`DELETE FROM review_runs WHERE id = ?`).run(id);
-  return result.changes > 0;
-}
-
 export function deleteCompletedRuns(): number {
   const db = getDb();
   const result = db
@@ -96,6 +90,12 @@ export function deleteRepo(id: number): ClonedRepo | undefined {
     db.prepare(`DELETE FROM cloned_repos WHERE id = ?`).run(id);
   }
   return repo;
+}
+
+export function deleteReviewRun(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare(`DELETE FROM review_runs WHERE id = ?`).run(id);
+  return result.changes > 0;
 }
 
 export function getDb(): Database.Database {
@@ -127,6 +127,14 @@ export function getRun(id: number): TaskRun | undefined {
   return db.prepare(`SELECT * FROM task_runs WHERE id = ?`).get(id) as
     | TaskRun
     | undefined;
+}
+
+export function getSetting(key: string, defaultValue: string): string {
+  const db = getDb();
+  const row = db
+    .prepare(`SELECT value FROM settings WHERE key = ?`)
+    .get(key) as undefined | { value: string };
+  return row?.value ?? defaultValue;
 }
 
 export function hasActiveReview(
@@ -287,15 +295,6 @@ export function listRuns(options?: {
   return { rows, total };
 }
 
-export function resetReviewRun(id: number): void {
-  const db = getDb();
-  db.prepare(
-    `UPDATE review_runs
-     SET status = 'queued', error_message = NULL, cost_usd = NULL, review_id = NULL, comment_count = 0, re_review_count = re_review_count + 1, updated_at = datetime('now')
-     WHERE id = ?`,
-  ).run(id);
-}
-
 export function markStaleReviewsAsFailed() {
   const db = getDb();
   const result = db
@@ -324,6 +323,23 @@ export function markStaleRunsAsFailed() {
   if (result.changes > 0) {
     log.warn({ count: result.changes }, "Marked stale runs as failed");
   }
+}
+
+export function resetReviewRun(id: number): void {
+  const db = getDb();
+  db.prepare(
+    `UPDATE review_runs
+     SET status = 'queued', error_message = NULL, cost_usd = NULL, review_id = NULL, comment_count = 0, re_review_count = re_review_count + 1, updated_at = datetime('now')
+     WHERE id = ?`,
+  ).run(id);
+}
+
+export function setSetting(key: string, value: string): void {
+  const db = getDb();
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run(key, value);
 }
 
 export function updateReviewRun(
@@ -372,22 +388,6 @@ export function updateRun(
   db.prepare(`UPDATE task_runs SET ${sets.join(", ")} WHERE id = ?`).run(
     ...values,
   );
-}
-
-export function getSetting(key: string, defaultValue: string): string {
-  const db = getDb();
-  const row = db
-    .prepare(`SELECT value FROM settings WHERE key = ?`)
-    .get(key) as { value: string } | undefined;
-  return row?.value ?? defaultValue;
-}
-
-export function setSetting(key: string, value: string): void {
-  const db = getDb();
-  db.prepare(
-    `INSERT INTO settings (key, value) VALUES (?, ?)
-     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
-  ).run(key, value);
 }
 
 export function upsertRepo(
