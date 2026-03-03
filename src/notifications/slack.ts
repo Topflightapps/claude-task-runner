@@ -9,53 +9,45 @@ export async function notifySlack(
   commentCount: number,
 ): Promise<void> {
   const config = getConfig();
-  if (!config.SLACK_WEBHOOK_URL) {
-    log.debug("No SLACK_WEBHOOK_URL configured, skipping notification");
+  if (!config.SLACK_BOT_TOKEN || !config.SLACK_USER_ID) {
+    log.debug(
+      "SLACK_BOT_TOKEN or SLACK_USER_ID not configured, skipping notification",
+    );
     return;
   }
 
-  const payload = {
-    blocks: [
-      {
-        text: {
-          text: "*PR Review Ready* :eyes:",
-          type: "mrkdwn",
-        },
-        type: "section",
-      },
-      {
-        text: {
-          text:
-            "*<" +
-            prUrl +
-            "|" +
-            prTitle +
-            ">*\n" +
-            String(commentCount) +
-            " comment" +
-            (commentCount === 1 ? "" : "s") +
-            " pending your approval",
-          type: "mrkdwn",
-        },
-        type: "section",
-      },
-    ],
-  };
+  const text =
+    "*PR Review Ready* :eyes:\n" +
+    "*<" +
+    prUrl +
+    "|" +
+    prTitle +
+    ">*\n" +
+    String(commentCount) +
+    " comment" +
+    (commentCount === 1 ? "" : "s") +
+    " pending your approval";
 
   try {
-    const response = await fetch(config.SLACK_WEBHOOK_URL, {
-      body: JSON.stringify(payload),
-      headers: { "Content-Type": "application/json" },
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      body: JSON.stringify({
+        channel: config.SLACK_USER_ID,
+        mrkdwn: true,
+        text,
+      }),
+      headers: {
+        Authorization: "Bearer " + config.SLACK_BOT_TOKEN,
+        "Content-Type": "application/json",
+      },
       method: "POST",
     });
 
-    if (!response.ok) {
-      log.error(
-        { status: response.status },
-        "Slack webhook returned non-OK status",
-      );
+    const result = (await response.json()) as { error?: string; ok: boolean };
+
+    if (!result.ok) {
+      log.error({ error: result.error }, "Slack API returned error");
     } else {
-      log.info({ prUrl }, "Slack notification sent");
+      log.info({ prUrl }, "Slack DM notification sent");
     }
   } catch (err) {
     log.error(err, "Failed to send Slack notification");

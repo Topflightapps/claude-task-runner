@@ -18,7 +18,8 @@ const configSchema = z.object({
   GITHUB_WEBHOOK_SECRET: z.string().optional(),
 
   REVIEW_TIMEOUT_MS: z.coerce.number().default(15 * 60 * 1000),
-  SLACK_WEBHOOK_URL: z.string().optional(),
+  SLACK_BOT_TOKEN: z.string().optional(),
+  SLACK_USER_ID: z.string().optional(),
 
   WEBHOOK_PORT: z.coerce.number().default(3000),
   WEBHOOK_SECRET: z.string().min(1),
