@@ -1,10 +1,7 @@
 import type { ClickUpTask } from "./clickup/types.js";
 
 import { runClaude, runRalphLoop } from "./claude/runner.js";
-import {
-  addComment,
-  updateTaskStatus,
-} from "./clickup/client.js";
+import { addComment, updateTaskStatus } from "./clickup/client.js";
 import { buildKickoffPrompt } from "./clickup/prompt-builder.js";
 import { getConfig } from "./config.js";
 import { insertRun, updateRun } from "./db.js";
@@ -18,6 +15,7 @@ import {
   removeRalphScaffolding,
 } from "./github/manager.js";
 import { createChildLogger } from "./logger.js";
+import { notifySlackTaskComplete } from "./notifications/slack.js";
 
 const log = createChildLogger("executor");
 
@@ -68,14 +66,22 @@ export async function executeTask(
     // PHASE 1: KICKOFF — Generate prd.json from ClickUp task
     updateRun(runId, { status: "running_claude" });
     taskEvents.emit("status:changed", { runId, status: "running_claude" });
-    emitSystemLine(runId, "Phase 1: Running Claude kickoff to generate prd.json...");
+    emitSystemLine(
+      runId,
+      "Phase 1: Running Claude kickoff to generate prd.json...",
+    );
     await addComment(
       task.id,
       "📋 Phase 1: Analyzing task and generating execution plan (prd.json)...",
     );
 
     const kickoffPrompt = buildKickoffPrompt(task, branchName);
-    const kickoffResult = await runClaude(repoPath, kickoffPrompt, undefined, runId);
+    const kickoffResult = await runClaude(
+      repoPath,
+      kickoffPrompt,
+      undefined,
+      runId,
+    );
 
     if (kickoffResult.costUsd) {
       updateRun(runId, { cost_usd: kickoffResult.costUsd });
@@ -100,8 +106,15 @@ export async function executeTask(
       "🔄 Phase 2: Running Ralph loop to implement stories...",
     );
 
-    emitSystemLine(runId, `Phase 2: Starting Ralph loop (max ${String(config.CLAUDE_MAX_TURNS)} iterations)...`);
-    const ralphResult = await runRalphLoop(repoPath, config.CLAUDE_MAX_TURNS, runId);
+    emitSystemLine(
+      runId,
+      `Phase 2: Starting Ralph loop (max ${String(config.CLAUDE_MAX_TURNS)} iterations)...`,
+    );
+    const ralphResult = await runRalphLoop(
+      repoPath,
+      config.CLAUDE_MAX_TURNS,
+      runId,
+    );
 
     if (!ralphResult.success) {
       throw new Error(
@@ -121,7 +134,10 @@ export async function executeTask(
     await removeRalphScaffolding(repoPath);
 
     if (await hasChanges(repoPath)) {
-      await commitAll(repoPath, `chore: finalize ${task.name} (ClickUp #${task.id})`);
+      await commitAll(
+        repoPath,
+        `chore: finalize ${task.name} (ClickUp #${task.id})`,
+      );
     }
 
     const prBody = [
@@ -151,6 +167,8 @@ export async function executeTask(
     // DONE — Update everything
     updateRun(runId, { pr_url: prUrl, status: "done" });
     taskEvents.emit("status:changed", { runId, status: "done" });
+
+    await notifySlackTaskComplete(task.name, prUrl);
 
     await addComment(
       task.id,

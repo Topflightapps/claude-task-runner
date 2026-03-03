@@ -53,3 +53,50 @@ export async function notifySlack(
     log.error(err, "Failed to send Slack notification");
   }
 }
+
+export async function notifySlackTaskComplete(
+  taskName: string,
+  prUrl: string,
+): Promise<void> {
+  const config = getConfig();
+  if (!config.SLACK_BOT_TOKEN || !config.SLACK_USER_ID) {
+    log.debug(
+      "SLACK_BOT_TOKEN or SLACK_USER_ID not configured, skipping notification",
+    );
+    return;
+  }
+
+  const text =
+    "*Task Complete* :white_check_mark:\n" +
+    "*<" +
+    prUrl +
+    "|" +
+    taskName +
+    ">*\n" +
+    "PR is ready for review";
+
+  try {
+    const response = await fetch("https://slack.com/api/chat.postMessage", {
+      body: JSON.stringify({
+        channel: config.SLACK_USER_ID,
+        mrkdwn: true,
+        text,
+      }),
+      headers: {
+        Authorization: "Bearer " + config.SLACK_BOT_TOKEN,
+        "Content-Type": "application/json",
+      },
+      method: "POST",
+    });
+
+    const result = (await response.json()) as { error?: string; ok: boolean };
+
+    if (!result.ok) {
+      log.error({ error: result.error }, "Slack API returned error");
+    } else {
+      log.info({ prUrl }, "Slack task-complete DM notification sent");
+    }
+  } catch (err) {
+    log.error(err, "Failed to send Slack task-complete notification");
+  }
+}
