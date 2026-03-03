@@ -7,12 +7,12 @@ interface ReviewRunsResult {
   total: number;
 }
 
-export function useReviews(token: string | null) {
+export function useReviews(token: string | null, wsVersion: number) {
   const [reviews, setReviews] = useState<ReviewRun[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(false);
   const [syncing, setSyncing] = useState(false);
-  const intervalRef = useRef<ReturnType<typeof setInterval>>(undefined);
+  const lastVersionRef = useRef(-1);
 
   const fetchReviews = useCallback(
     async (status?: string) => {
@@ -36,14 +36,11 @@ export function useReviews(token: string | null) {
     [token],
   );
 
-  const startPolling = useCallback(
-    (intervalMs = 5000) => {
-      void fetchReviews();
-      intervalRef.current = setInterval(() => void fetchReviews(), intervalMs);
-      return () => clearInterval(intervalRef.current);
-    },
-    [fetchReviews],
-  );
+  // Refetch when WebSocket version changes (replaces interval polling)
+  if (wsVersion !== lastVersionRef.current) {
+    lastVersionRef.current = wsVersion;
+    void fetchReviews();
+  }
 
   const cancelReview = useCallback(
     async (id: number) => {
@@ -81,14 +78,13 @@ export function useReviews(token: string | null) {
   }, [token, fetchReviews]);
 
   return {
-    reviews,
-    total,
-    loading,
-    syncing,
-    fetchReviews,
-    startPolling,
     cancelReview,
     clearCompleted,
+    fetchReviews,
+    loading,
+    reviews,
+    syncing,
     syncReviews,
+    total,
   };
 }

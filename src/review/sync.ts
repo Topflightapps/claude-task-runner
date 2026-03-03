@@ -10,11 +10,14 @@ const execFileAsync = promisify(execFile);
 const log = createChildLogger("review-sync");
 
 interface GHSearchResult {
-  headRefName: string;
   number: number;
   repository: { nameWithOwner: string };
   title: string;
   url: string;
+}
+
+interface GHPRDetail {
+  headRefName: string;
 }
 
 export async function syncPendingReviews(): Promise<number> {
@@ -40,7 +43,7 @@ export async function syncPendingReviews(): Promise<number> {
         "--review-requested=" + config.GITHUB_USERNAME,
         "--state=open",
         "--json",
-        "number,title,url,headRefName,repository",
+        "number,title,url,repository",
       ],
       { env: ghEnv, maxBuffer: 10 * 1024 * 1024 },
     );
@@ -58,9 +61,8 @@ export async function syncPendingReviews(): Promise<number> {
         "prs",
         "--assignee=" + config.GITHUB_USERNAME,
         "--state=open",
-        "--review=required",
         "--json",
-        "number,title,url,headRefName,repository",
+        "number,title,url,repository",
       ],
       { env: ghEnv, maxBuffer: 10 * 1024 * 1024 },
     );
@@ -89,8 +91,34 @@ export async function syncPendingReviews(): Promise<number> {
       continue;
     }
 
+    // Fetch the branch name via gh pr view (not available in search results)
+    let branch: string;
+    try {
+      const { stdout } = await execFileAsync(
+        "gh",
+        [
+          "pr",
+          "view",
+          String(pr.number),
+          "--repo",
+          pr.repository.nameWithOwner,
+          "--json",
+          "headRefName",
+        ],
+        { env: ghEnv, maxBuffer: 10 * 1024 * 1024 },
+      );
+      const detail = JSON.parse(stdout) as GHPRDetail;
+      branch = detail.headRefName;
+    } catch (err) {
+      log.error(
+        { error: err, prNumber: pr.number, repo: pr.repository.nameWithOwner },
+        "Failed to fetch PR branch, skipping",
+      );
+      continue;
+    }
+
     enqueueReview({
-      pr_branch: pr.headRefName,
+      pr_branch: branch,
       pr_number: pr.number,
       pr_title: pr.title,
       pr_url: pr.url,

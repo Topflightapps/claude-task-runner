@@ -20,19 +20,17 @@ export function Dashboard({
   const { runs, startPolling, cancelRun, retryRun, clearCompleted } =
     useTaskRuns(token);
 
+  const { lines, connected, clearLines, reviewVersion } = useWebSocket(token);
+
   const {
     reviews,
-    startPolling: startReviewPolling,
     cancelReview,
     clearCompleted: clearCompletedReviews,
     syncReviews,
     syncing,
-  } = useReviews(token);
-
-  const { lines, connected, clearLines } = useWebSocket(token);
+  } = useReviews(token, reviewVersion);
 
   useEffect(() => startPolling(5000), [startPolling]);
-  useEffect(() => startReviewPolling(5000), [startReviewPolling]);
 
   const activeRun =
     runs.find((r) => !["done", "failed"].includes(r.status)) ?? null;

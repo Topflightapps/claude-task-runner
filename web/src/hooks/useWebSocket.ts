@@ -3,15 +3,20 @@ import { useCallback, useRef, useSyncExternalStore } from "react";
 import type { WsMessage } from "../types.ts";
 
 interface WsState {
-  lines: { runId: number; stream: string; line: string; ts?: string }[];
   connected: boolean;
+  lines: { line: string; runId: number; stream: string; ts?: string }[];
+  reviewVersion: number;
 }
 
 const MAX_LINES = 2000;
 
 export function useWebSocket(token: string | null) {
   const wsRef = useRef<WebSocket | null>(null);
-  const stateRef = useRef<WsState>({ lines: [], connected: false });
+  const stateRef = useRef<WsState>({
+    connected: false,
+    lines: [],
+    reviewVersion: 0,
+  });
   const listenersRef = useRef<Set<() => void>>(new Set<() => void>());
   const reconnectTimerRef = useRef<ReturnType<typeof setTimeout>>(undefined);
   const backoffRef = useRef(1000);
@@ -28,7 +33,9 @@ export function useWebSocket(token: string | null) {
     wsRef.current?.close();
 
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const ws = new WebSocket(`${protocol}//${window.location.host}/ws?token=${token}`);
+    const ws = new WebSocket(
+      `${protocol}//${window.location.host}/ws?token=${token}`,
+    );
     wsRef.current = ws;
 
     ws.onopen = () => {
@@ -50,7 +57,16 @@ export function useWebSocket(token: string | null) {
         stateRef.current = { ...stateRef.current, lines: newLines };
         notify();
       } else if (msg.type === "status" || msg.type === "queue") {
-        // Trigger re-render so useTaskRuns can refetch
+        notify();
+      } else if (
+        msg.type === "review:status" ||
+        msg.type === "review:queue" ||
+        msg.type === "review:output"
+      ) {
+        stateRef.current = {
+          ...stateRef.current,
+          reviewVersion: stateRef.current.reviewVersion + 1,
+        };
         notify();
       }
     };
