@@ -7,10 +7,16 @@ import { createChildLogger } from "../logger.js";
 
 const log = createChildLogger("review-api");
 
+interface GHReview {
+  id: number;
+  state: string;
+  user: { login: string };
+}
+
 /**
- * Create a pending review on a PR. Tries to submit all comments at once;
- * if that fails (e.g. line numbers outside the diff), falls back to creating
- * an empty review then adding comments individually, skipping any that fail.
+ * Create a pending review on a PR. Dismisses any existing pending reviews
+ * first, then tries to submit all comments at once. If that fails (e.g. line
+ * numbers outside the diff), falls back to adding comments individually.
  */
 export async function createPendingReview(
   repoFullName: string,
@@ -24,6 +30,9 @@ export async function createPendingReview(
     { commentCount: comments.length, prNumber, repoFullName },
     "Creating pending review",
   );
+
+  // Dismiss any orphaned pending reviews from previous attempts
+  await dismissExistingPendingReviews(repoFullName, prNumber);
 
   // Try submitting all comments at once first
   try {
@@ -95,6 +104,54 @@ export async function createPendingReview(
   return reviewId;
 }
 
+async function dismissExistingPendingReviews(
+  repoFullName: string,
+  prNumber: number,
+): Promise<void> {
+  const endpoint =
+    "repos/" + repoFullName + "/pulls/" + String(prNumber) + "/reviews";
+
+  try {
+    const stdout = await ghApiGet(endpoint);
+    const reviews = JSON.parse(stdout) as GHReview[];
+
+    // Find PENDING reviews authored by our token's user
+    const pending = reviews.filter((r) => r.state === "PENDING");
+    for (const review of pending) {
+      log.info(
+        { prNumber, repoFullName, reviewId: review.id },
+        "Dismissing orphaned pending review",
+      );
+      try {
+        // Delete the pending review (PUT with DISMISS event)
+        await ghApiRequest(
+          endpoint + "/" + String(review.id) + "/dismissals",
+          "PUT",
+          JSON.stringify({
+            event: "DISMISS",
+            message: "Replacing with new review",
+          }),
+        );
+      } catch {
+        // If dismiss fails, try deleting it instead
+        try {
+          await ghApiRequest(endpoint + "/" + String(review.id), "DELETE", "");
+        } catch (deleteErr) {
+          log.warn(
+            { error: String(deleteErr), reviewId: review.id },
+            "Could not remove orphaned pending review",
+          );
+        }
+      }
+    }
+  } catch (err) {
+    log.warn(
+      { error: String(err) },
+      "Could not check for existing pending reviews",
+    );
+  }
+}
+
 async function getLatestCommit(
   repoFullName: string,
   prNumber: number,
@@ -139,15 +196,22 @@ function ghApiGet(endpoint: string): Promise<string> {
 }
 
 function ghApiPost(endpoint: string, body: string): Promise<string> {
+  return ghApiRequest(endpoint, "POST", body);
+}
+
+function ghApiRequest(
+  endpoint: string,
+  method: string,
+  body: string,
+): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(
-      "gh",
-      ["api", endpoint, "--method", "POST", "--input", "-"],
-      {
-        env: ghEnv(),
-        stdio: ["pipe", "pipe", "pipe"],
-      },
-    );
+    const args = ["api", endpoint, "--method", method];
+    if (body) args.push("--input", "-");
+
+    const child = spawn("gh", args, {
+      env: ghEnv(),
+      stdio: ["pipe", "pipe", "pipe"],
+    });
 
     let stdout = "";
     let stderr = "";
@@ -171,7 +235,9 @@ function ghApiPost(endpoint: string, body: string): Promise<string> {
 
     child.on("error", reject);
 
-    child.stdin.write(body);
+    if (body) {
+      child.stdin.write(body);
+    }
     child.stdin.end();
   });
 }
