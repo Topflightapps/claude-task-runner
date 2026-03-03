@@ -5,6 +5,9 @@ export interface ClaudeReviewOutput {
 
 export interface GitHubPullRequestEvent {
   action: string;
+  assignee?: {
+    login: string;
+  };
   number: number;
   pull_request: {
     head: {

@@ -297,8 +297,10 @@ function handleGitHubPREvent(payload: GitHubPullRequestEvent): void {
       return;
     }
   } else if (action === "assigned") {
-    // Match assigned where the PR assignee is us — but we only care if
-    // there's a review to do. We'll let it through and dedup below.
+    if (payload.assignee?.login !== config.GITHUB_USERNAME) {
+      log.debug({ action, repo }, "Assignment not for us");
+      return;
+    }
   } else {
     log.debug({ action }, "Ignoring non-review PR action");
     return;
