@@ -5,23 +5,44 @@ import type { ClaudeReviewOutput } from "../github/types.js";
 /**
  * Tests for parsing Claude review output. The review runner expects
  * Claude to output JSON with { summary, comments: [{ path, line, body, side }] }.
- * These tests validate the regex-based extraction handles various formats.
+ * Uses balanced-brace extraction to handle various output formats.
  */
 
-// Extracted from review-runner.ts for testability
+// Mirrors the implementation in review-runner.ts
 function parseReviewOutput(text: string): ClaudeReviewOutput | null {
-  const jsonMatch = /\{[\s\S]*"comments"[\s\S]*\}/.exec(text);
-  if (!jsonMatch) return null;
+  const stripped = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
 
+  const result = tryParseReview(stripped);
+  if (result) return result;
+
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  for (let i = start; i < stripped.length; i++) {
+    if (stripped[i] === "{") depth++;
+    else if (stripped[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        const candidate = stripped.slice(start, i + 1);
+        const parsed = tryParseReview(candidate);
+        if (parsed) return parsed;
+      }
+    }
+  }
+
+  return null;
+}
+
+function tryParseReview(text: string): ClaudeReviewOutput | null {
   try {
-    const parsed = JSON.parse(jsonMatch[0]) as ClaudeReviewOutput;
+    const parsed = JSON.parse(text) as ClaudeReviewOutput;
     if (typeof parsed.summary === "string" && Array.isArray(parsed.comments)) {
       return parsed;
     }
   } catch {
-    // Failed to parse
+    // Not valid JSON
   }
-
   return null;
 }
 
@@ -29,16 +50,21 @@ describe("parseReviewOutput", () => {
   it("should parse clean JSON output", () => {
     const input = JSON.stringify({
       comments: [
-        { body: "Consider using const", line: 10, path: "src/foo.ts", side: "RIGHT" },
+        {
+          body: "Consider using const",
+          line: 10,
+          path: "src/foo.ts",
+          side: "RIGHT",
+        },
       ],
       summary: "Looks good overall",
     });
 
     const result = parseReviewOutput(input);
     expect(result).not.toBeNull();
-    expect(result!.summary).toBe("Looks good overall");
-    expect(result!.comments).toHaveLength(1);
-    expect(result!.comments[0]!.path).toBe("src/foo.ts");
+    expect(result?.summary).toBe("Looks good overall");
+    expect(result?.comments).toHaveLength(1);
+    expect(result?.comments[0]?.path).toBe("src/foo.ts");
   });
 
   it("should extract JSON from surrounding text", () => {
@@ -53,7 +79,7 @@ That concludes my review.`;
 
     const result = parseReviewOutput(input);
     expect(result).not.toBeNull();
-    expect(result!.comments).toHaveLength(1);
+    expect(result?.comments).toHaveLength(1);
   });
 
   it("should handle empty comments array", () => {
@@ -64,8 +90,8 @@ That concludes my review.`;
 
     const result = parseReviewOutput(input);
     expect(result).not.toBeNull();
-    expect(result!.comments).toHaveLength(0);
-    expect(result!.summary).toBe("PR looks clean, no issues found");
+    expect(result?.comments).toHaveLength(0);
+    expect(result?.summary).toBe("PR looks clean, no issues found");
   });
 
   it("should return null for non-JSON input", () => {
@@ -92,7 +118,7 @@ That concludes my review.`;
 
     const result = parseReviewOutput(input);
     expect(result).not.toBeNull();
-    expect(result!.comments).toHaveLength(3);
+    expect(result?.comments).toHaveLength(3);
   });
 
   it("should handle JSON wrapped in markdown code fences", () => {
@@ -102,8 +128,29 @@ That concludes my review.`;
     });
     const input = "```json\n" + json + "\n```";
 
-    // The regex should still find the JSON inside the fences
     const result = parseReviewOutput(input);
     expect(result).not.toBeNull();
+  });
+
+  it("should handle JSON with triple backticks and language tag", () => {
+    const input =
+      "Here's the review:\n\n```json\n" +
+      '{"summary": "Good PR", "comments": [{"path": "a.ts", "line": 1, "body": "nit"}]}' +
+      "\n```\n\nDone.";
+
+    const result = parseReviewOutput(input);
+    expect(result).not.toBeNull();
+    expect(result?.summary).toBe("Good PR");
+  });
+
+  it("should handle JSON preceded by non-JSON braces", () => {
+    // e.g. Claude says "The function foo() { ... } has issues" before the JSON
+    const input =
+      "I looked at the code.\n\n" +
+      '{"summary": "Found issues", "comments": [{"path": "x.ts", "line": 5, "body": "Bug"}]}';
+
+    const result = parseReviewOutput(input);
+    expect(result).not.toBeNull();
+    expect(result?.comments).toHaveLength(1);
   });
 });

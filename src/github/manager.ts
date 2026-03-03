@@ -96,6 +96,10 @@ export async function ensureRepoForReview(
   await git(dir, "reset", "--hard", `origin/${prBranch}`);
   await git(dir, "clean", "-fd");
 
+  // Track the cloned repo in DB so it appears in Cloned Repos panel
+  const sizeBytes = await getDirSize(dir);
+  upsertRepo(httpsUrl, dir, sizeBytes);
+
   return dir;
 }
 

@@ -104,17 +104,30 @@ function ensureClaudeConfig(): void {
 }
 
 function parseReviewOutput(text: string): ClaudeReviewOutput | null {
-  // Try to extract JSON from the output — Claude may include extra text
-  const jsonMatch = /\{[\s\S]*"comments"[\s\S]*\}/.exec(text);
-  if (!jsonMatch) return null;
+  // Strip markdown code fences if present
+  const stripped = text.replace(/```json\s*/g, "").replace(/```\s*/g, "");
 
-  try {
-    const parsed = JSON.parse(jsonMatch[0]) as ClaudeReviewOutput;
-    if (typeof parsed.summary === "string" && Array.isArray(parsed.comments)) {
-      return parsed;
+  // Try parsing the full text as JSON first
+  const result = tryParseReview(stripped);
+  if (result) return result;
+
+  // Try to find a JSON object containing "comments"
+  // Use a balanced-brace approach instead of greedy regex
+  const start = stripped.indexOf("{");
+  if (start === -1) return null;
+
+  let depth = 0;
+  for (let i = start; i < stripped.length; i++) {
+    if (stripped[i] === "{") depth++;
+    else if (stripped[i] === "}") {
+      depth--;
+      if (depth === 0) {
+        const candidate = stripped.slice(start, i + 1);
+        const parsed = tryParseReview(candidate);
+        if (parsed) return parsed;
+        // Keep looking — there might be another JSON object
+      }
     }
-  } catch {
-    // Failed to parse
   }
 
   return null;
@@ -228,6 +241,16 @@ function spawnReviewProcess(
       const text = resultText || stdout;
       const parsed = parseReviewOutput(text);
 
+      if (!parsed) {
+        log.error(
+          {
+            resultText: resultText.slice(0, 3000),
+            stdoutTail: stdout.slice(-2000),
+          },
+          "Failed to parse review output",
+        );
+      }
+
       log.info(
         {
           commentCount: parsed?.comments.length ?? 0,
@@ -247,4 +270,16 @@ function spawnReviewProcess(
       resolve({ output: null, success: false });
     });
   });
+}
+
+function tryParseReview(text: string): ClaudeReviewOutput | null {
+  try {
+    const parsed = JSON.parse(text) as ClaudeReviewOutput;
+    if (typeof parsed.summary === "string" && Array.isArray(parsed.comments)) {
+      return parsed;
+    }
+  } catch {
+    // Not valid JSON
+  }
+  return null;
 }
