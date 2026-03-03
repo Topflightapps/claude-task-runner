@@ -72,7 +72,7 @@ export async function runClaudeReview(
     "--verbose",
     "--dangerously-skip-permissions",
     "--max-turns",
-    "25",
+    "50",
   ];
 
   ensureClaudeConfig();
