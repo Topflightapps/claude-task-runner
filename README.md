@@ -38,9 +38,7 @@ Currently supports Next.js projects. Designed to run on Railway, a Linux VPS, or
 
 The fastest way to get started is a one-click deploy to Railway:
 
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/new/template/TEMPLATE_CODE)
-
-<!-- TODO: Replace TEMPLATE_CODE above with your actual template code after publishing at https://railway.com/account/templates -->
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PmV0za?referralCode=r_IbaC&utm_medium=integration&utm_source=template&utm_campaign=generic)
 
 ### What you get
 
