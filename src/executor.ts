@@ -1,7 +1,14 @@
+import { existsSync, rmSync } from "node:fs";
+import { join } from "node:path";
+
 import type { ClickUpTask } from "./clickup/types.js";
 
 import { runClaude, runRalphLoop } from "./claude/runner.js";
-import { addComment, updateTaskStatus } from "./clickup/client.js";
+import {
+  addComment,
+  downloadAttachments,
+  updateTaskStatus,
+} from "./clickup/client.js";
 import { buildKickoffPrompt } from "./clickup/prompt-builder.js";
 import { getConfig } from "./config.js";
 import { insertRun, updateRun } from "./db.js";
@@ -63,6 +70,15 @@ export async function executeTask(
     emitSystemLine(runId, `Repo ready — branch: ${branchName}`);
     log.info({ branchName, repoPath }, "Repo ready");
 
+    // ATTACHMENTS — Download task attachments for Claude to read
+    const attachments = await downloadAttachments(task, repoPath);
+    if (attachments.length > 0) {
+      emitSystemLine(
+        runId,
+        `Downloaded ${String(attachments.length)} attachment(s)`,
+      );
+    }
+
     // PHASE 1: KICKOFF — Generate prd.json from ClickUp task
     updateRun(runId, { status: "running_claude" });
     taskEvents.emit("status:changed", { runId, status: "running_claude" });
@@ -75,7 +91,7 @@ export async function executeTask(
       "📋 Phase 1: Analyzing task and generating execution plan (prd.json)...",
     );
 
-    const kickoffPrompt = buildKickoffPrompt(task, branchName);
+    const kickoffPrompt = buildKickoffPrompt(task, branchName, attachments);
     const kickoffResult = await runClaude(
       repoPath,
       kickoffPrompt,
@@ -132,6 +148,13 @@ export async function executeTask(
 
     // Remove ralph scaffolding — it's task runner internals, not project code
     await removeRalphScaffolding(repoPath);
+
+    // Remove downloaded attachments — they're task runner internals
+    const attachDir = join(repoPath, ".task-attachments");
+    if (existsSync(attachDir)) {
+      rmSync(attachDir, { force: true, recursive: true });
+      log.info("Removed .task-attachments/ directory");
+    }
 
     if (await hasChanges(repoPath)) {
       await commitAll(

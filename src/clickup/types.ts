@@ -1,3 +1,10 @@
+export interface ClickUpAttachment {
+  extension: string;
+  id: string;
+  title: string;
+  url: string;
+}
+
 export interface ClickUpChecklist {
   id: string;
   items: {
@@ -33,6 +40,7 @@ export interface ClickUpSpace {
 
 export interface ClickUpTask {
   assignees: { id: number; username: string }[];
+  attachments: ClickUpAttachment[];
   checklists: ClickUpChecklist[];
   custom_fields: ClickUpCustomField[];
   date_created: string;

@@ -1,13 +1,31 @@
 import type { ClickUpTask } from "./types.js";
 
+export interface AttachmentPath {
+  extension: string;
+  localPath: string;
+  title: string;
+}
+
 const FIGMA_URL_REGEX =
   /https:\/\/(?:www\.)?figma\.com\/(?:design|file)\/[^\s)]+/g;
+
+const DOCUMENT_EXTENSIONS = new Set([
+  "csv",
+  "docx",
+  "json",
+  "md",
+  "pdf",
+  "txt",
+]);
 
 /**
  * Builds a simple direct-implementation prompt for tasks that don't
  * need the Ralph loop (single-story tasks).
  */
-export function buildDirectPrompt(task: ClickUpTask): string {
+export function buildDirectPrompt(
+  task: ClickUpTask,
+  attachments: AttachmentPath[] = [],
+): string {
   const figmaUrls = extractFigmaUrls(task);
 
   const sections: string[] = [
@@ -38,6 +56,12 @@ export function buildDirectPrompt(task: ClickUpTask): string {
     sections.push(
       "\nExtract exact colors, spacing, typography, and layout from the Figma file. Match the design precisely.",
     );
+    sections.push("");
+  }
+
+  const attachmentSection = formatAttachments(attachments);
+  if (attachmentSection) {
+    sections.push(attachmentSection);
     sections.push("");
   }
 
@@ -73,6 +97,7 @@ export function buildDirectPrompt(task: ClickUpTask): string {
 export function buildKickoffPrompt(
   task: ClickUpTask,
   branchName: string,
+  attachments: AttachmentPath[] = [],
 ): string {
   const figmaUrls = extractFigmaUrls(task);
 
@@ -108,6 +133,12 @@ export function buildKickoffPrompt(
     for (const url of figmaUrls) {
       sections.push(`- ${url}`);
     }
+    sections.push("");
+  }
+
+  const attachmentSection = formatAttachments(attachments);
+  if (attachmentSection) {
+    sections.push(attachmentSection);
     sections.push("");
   }
 
@@ -212,6 +243,30 @@ function extractFigmaUrls(task: ClickUpTask): string[] {
   }
 
   return Array.from(urls);
+}
+
+function formatAttachments(attachments: AttachmentPath[]): string {
+  if (attachments.length === 0) return "";
+
+  const lines = ["## Attachments\n"];
+  lines.push(
+    "The following files were attached to the ClickUp task and downloaded locally. Read them for additional context.\n",
+  );
+
+  for (const att of attachments) {
+    const ext = att.extension.toLowerCase();
+    if (DOCUMENT_EXTENSIONS.has(ext)) {
+      lines.push(
+        `- **${att.title}** — Read the file content: \`${att.localPath}\``,
+      );
+    } else {
+      lines.push(
+        `- **${att.title}** — View with the Read tool: \`${att.localPath}\``,
+      );
+    }
+  }
+
+  return lines.join("\n");
 }
 
 function formatChecklists(task: ClickUpTask): string {

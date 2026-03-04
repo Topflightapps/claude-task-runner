@@ -1,3 +1,13 @@
+import mammoth from "mammoth";
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { Readable } from "node:stream";
+import { pipeline } from "node:stream/promises";
 import pThrottle from "p-throttle";
 
 import type { ClickUpTask } from "./types.js";
@@ -41,12 +51,98 @@ async function apiRequest<T>(
 
 const throttledRequest = throttle(apiRequest);
 
+export interface DownloadedAttachment {
+  extension: string;
+  localPath: string;
+  title: string;
+}
+
 export async function addComment(taskId: string, text: string): Promise<void> {
   await throttledRequest(`/task/${taskId}/comment`, {
     body: JSON.stringify({ comment_text: text }),
     method: "POST",
   });
   log.debug({ taskId }, "Added comment to task");
+}
+
+export async function downloadAttachments(
+  task: ClickUpTask,
+  destDir: string,
+): Promise<DownloadedAttachment[]> {
+  if (task.attachments.length === 0) return [];
+
+  const attachDir = join(destDir, ".task-attachments");
+  if (!existsSync(attachDir)) {
+    mkdirSync(attachDir, { recursive: true });
+  }
+
+  const results: DownloadedAttachment[] = [];
+
+  for (const attachment of task.attachments) {
+    try {
+      const filename = sanitizeFilename(attachment.title);
+      const localPath = join(attachDir, filename);
+
+      const res = await fetch(attachment.url, {
+        headers: { Authorization: getConfig().CLICKUP_API_TOKEN },
+      });
+
+      if (!res.ok || !res.body) {
+        log.warn(
+          { status: res.status, title: attachment.title },
+          "Failed to download attachment",
+        );
+        continue;
+      }
+
+      const nodeStream = Readable.fromWeb(res.body);
+      await pipeline(nodeStream, createWriteStream(localPath));
+
+      results.push({
+        extension: attachment.extension,
+        localPath,
+        title: attachment.title,
+      });
+
+      log.debug(
+        { localPath, title: attachment.title },
+        "Downloaded attachment",
+      );
+
+      if (
+        attachment.extension === "docx" ||
+        attachment.title.endsWith(".docx")
+      ) {
+        try {
+          const mdResult = await mammoth.extractRawText({ path: localPath });
+          const mdPath = localPath.replace(/\.docx$/i, ".md");
+          writeFileSync(mdPath, mdResult.value, "utf-8");
+          results.push({
+            extension: "md",
+            localPath: mdPath,
+            title: attachment.title.replace(/\.docx$/i, ".md"),
+          });
+          log.debug({ mdPath }, "Converted docx to text");
+        } catch (convErr) {
+          log.warn(
+            { error: convErr, title: attachment.title },
+            "Failed to convert docx to text",
+          );
+        }
+      }
+    } catch (err) {
+      log.warn(
+        { error: err, title: attachment.title },
+        "Failed to download attachment",
+      );
+    }
+  }
+
+  log.info(
+    { count: results.length, taskId: task.id },
+    "Downloaded task attachments",
+  );
+  return results;
 }
 
 export function getRepoUrl(task: ClickUpTask): null | string {
@@ -98,4 +194,8 @@ export async function updateTaskStatus(
     method: "PUT",
   });
   log.info({ status, taskId }, "Updated task status");
+}
+
+function sanitizeFilename(name: string): string {
+  return name.replace(/[/\\:*?"<>|]/g, "_").trim() || "attachment";
 }

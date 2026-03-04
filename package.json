@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "better-sqlite3": "^11.7.0",
+    "mammoth": "^1.11.0",
     "p-throttle": "^6.2.0",
     "pino": "^9.6.0",
     "ws": "^8.18.0",
