@@ -13,7 +13,6 @@ const execFileAsync = promisify(execFile);
 const log = createChildLogger("claude");
 
 const KICKOFF_TIMEOUT_MS = 10 * 60 * 1000; // 10 minutes for kickoff
-const RALPH_TIMEOUT_MS = 60 * 60 * 1000; // 60 minutes for ralph loop
 
 export interface ClaudeResult {
   costUsd?: number;
@@ -96,8 +95,6 @@ export async function runClaude(
     "stream-json",
     "--verbose",
     "--dangerously-skip-permissions",
-    "--max-turns",
-    String(config.CLAUDE_MAX_TURNS),
     "--append-system-prompt",
     "When you have fully completed the task and verified everything works, output exactly: TASK_COMPLETE",
   ];
@@ -196,14 +193,7 @@ export async function runRalphLoop(
       }
     });
 
-    const timeout = setTimeout(() => {
-      log.error("Ralph loop timed out, killing process");
-      child.kill("SIGTERM");
-      setTimeout(() => child.kill("SIGKILL"), 5_000);
-    }, RALPH_TIMEOUT_MS);
-
     child.on("close", (code) => {
-      clearTimeout(timeout);
       if (runId !== undefined) {
         activeProcesses.delete(runId);
       }
@@ -223,7 +213,6 @@ export async function runRalphLoop(
     });
 
     child.on("error", (err) => {
-      clearTimeout(timeout);
       if (runId !== undefined) {
         activeProcesses.delete(runId);
       }
