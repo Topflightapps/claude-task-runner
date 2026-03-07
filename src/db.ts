@@ -453,6 +453,23 @@ function migrate(db: Database.Database) {
       cloned_at       TEXT DEFAULT (datetime('now')),
       last_used_at    TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS learnings (
+      id              INTEGER PRIMARY KEY AUTOINCREMENT,
+      content         TEXT NOT NULL,
+      embedding       BLOB,
+      category        TEXT,
+      tags            TEXT DEFAULT '[]',
+      project_type    TEXT,
+      source_agent    TEXT,
+      source_repo     TEXT,
+      source_task_id  TEXT,
+      created_at      TEXT DEFAULT (datetime('now')),
+      updated_at      TEXT DEFAULT (datetime('now')),
+      superseded_by   INTEGER REFERENCES learnings(id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_learnings_category ON learnings(category);
+    CREATE INDEX IF NOT EXISTS idx_learnings_project_type ON learnings(project_type);
   `);
 
   // Add re_review_count column (idempotent)

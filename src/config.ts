@@ -18,6 +18,12 @@ const configSchema = z
     GITHUB_USERNAME: z.string().optional(),
     GITHUB_WEBHOOK_SECRET: z.string().optional(),
 
+    LIBRARIAN_ENABLED: z
+      .enum(["true", "false", "1", "0"])
+      .default("false")
+      .transform((v) => v === "true" || v === "1"),
+    OPENAI_API_KEY: z.string().optional(),
+
     // Railway injects PORT; fall back to WEBHOOK_PORT or 3000
     PORT: z.coerce.number().optional(),
 

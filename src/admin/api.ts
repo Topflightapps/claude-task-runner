@@ -26,6 +26,11 @@ import {
   reviewOutputBuffer,
   taskEvents,
 } from "../events.js";
+import {
+  deleteLearning,
+  getLearningStats,
+  listLearnings,
+} from "../librarian/learnings-db.js";
 import { cancelAllReviews } from "../review/queue.js";
 import { handleLogin, validateAuth } from "./auth.js";
 
@@ -42,7 +47,10 @@ export function handleAdminApi(
 
   // CORS headers
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, OPTIONS");
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "GET, POST, PUT, DELETE, OPTIONS",
+  );
   res.setHeader("Access-Control-Allow-Headers", "Content-Type, Authorization");
 
   if (method === "OPTIONS") {
@@ -60,6 +68,44 @@ export function handleAdminApi(
   // Auth check for everything else
   if (!validateAuth(req)) {
     json(res, 401, { error: "Unauthorized" });
+    return;
+  }
+
+  // GET /api/learnings
+  if (path === "/api/learnings" && method === "GET") {
+    const category = url.searchParams.get("category") ?? undefined;
+    const project_type = url.searchParams.get("project_type") ?? undefined;
+    const source_agent = url.searchParams.get("source_agent") ?? undefined;
+    const limit = Number(url.searchParams.get("limit")) || 50;
+    const offset = Number(url.searchParams.get("offset")) || 0;
+    const result = listLearnings({
+      category,
+      limit,
+      offset,
+      project_type,
+      source_agent,
+    });
+    json(res, 200, result);
+    return;
+  }
+
+  // GET /api/learnings/stats
+  if (path === "/api/learnings/stats" && method === "GET") {
+    const stats = getLearningStats();
+    json(res, 200, stats);
+    return;
+  }
+
+  // DELETE /api/learnings/:id
+  const learningDeleteMatch = /^\/api\/learnings\/(\d+)$/.exec(path);
+  if (learningDeleteMatch && method === "DELETE") {
+    const id = Number(learningDeleteMatch[1]);
+    const deleted = deleteLearning(id);
+    if (!deleted) {
+      json(res, 404, { error: "Learning not found" });
+      return;
+    }
+    json(res, 200, { ok: true });
     return;
   }
 
@@ -279,7 +325,11 @@ export function handleAdminApi(
       json(res, 404, { error: "Review not found" });
       return;
     }
-    if (!["ready", "approved", "failed", "changes_requested"].includes(review.status)) {
+    if (
+      !["approved", "changes_requested", "failed", "ready"].includes(
+        review.status,
+      )
+    ) {
       json(res, 400, { error: "Can only dismiss finished reviews" });
       return;
     }

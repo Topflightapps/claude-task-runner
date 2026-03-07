@@ -5,6 +5,7 @@ import { join } from "node:path";
 
 import type { PreviousComment } from "../github/review-api.js";
 import type { ClaudeReviewOutput } from "../github/types.js";
+import type { Learning } from "../librarian/learnings-db.js";
 
 import { getConfig } from "../config.js";
 import {
@@ -20,6 +21,7 @@ const log = createChildLogger("review-runner");
 export interface ReviewResult {
   costUsd?: number;
   output: ClaudeReviewOutput | null;
+  rawOutput: string;
   success: boolean;
 }
 
@@ -28,6 +30,7 @@ export async function runClaudeReReview(
   prBaseBranch: string,
   reviewId: number,
   previousComments: PreviousComment[],
+  learnings: Learning[] = [],
 ): Promise<ReviewResult> {
   const config = getConfig();
 
@@ -67,7 +70,8 @@ export async function runClaudeReReview(
     "  ]\n" +
     "}\n\n" +
     "Only include comments for UNRESOLVED previous concerns or NEW issues. " +
-    "If all previous concerns were addressed and no new issues exist, return an empty comments array.";
+    "If all previous concerns were addressed and no new issues exist, return an empty comments array." +
+    buildLearningsSection(learnings);
 
   const args = [
     "-p",
@@ -93,6 +97,7 @@ export async function runClaudeReview(
   repoPath: string,
   prBaseBranch: string,
   reviewId: number,
+  learnings: Learning[] = [],
 ): Promise<ReviewResult> {
   const config = getConfig();
 
@@ -129,7 +134,8 @@ export async function runClaudeReview(
     "- Missing error handling at system boundaries\n" +
     "- Unclear or misleading code\n\n" +
     "Do NOT comment on style, formatting, or trivial issues.\n" +
-    "If the code looks good with no substantive issues, return an empty comments array.";
+    "If the code looks good with no substantive issues, return an empty comments array." +
+    buildLearningsSection(learnings);
 
   const args = [
     "-p",
@@ -146,6 +152,18 @@ export async function runClaudeReview(
   log.info({ repoPath, reviewId }, "Starting Claude Code review");
 
   return spawnReviewProcess(repoPath, args, config.REVIEW_TIMEOUT_MS, reviewId);
+}
+
+function buildLearningsSection(learnings: Learning[]): string {
+  if (learnings.length === 0) return "";
+  const items = learnings
+    .map((l) => `- **[${l.category ?? "general"}]** ${l.content}`)
+    .join("\n");
+  return (
+    "\n\nRelevant learnings from previous reviews and tasks:\n" +
+    items +
+    "\n\nUse these learnings to inform your review — look for patterns that match or contradict them.\n"
+  );
 }
 
 /**
@@ -303,6 +321,8 @@ function spawnReviewProcess(
       clearTimeout(timeout);
       activeReviewProcesses.delete(reviewId);
 
+      const rawOutput = resultText || stdout;
+
       if (code !== 0) {
         log.error(
           {
@@ -312,12 +332,11 @@ function spawnReviewProcess(
           },
           "Review exited with error",
         );
-        resolve({ output: null, success: false });
+        resolve({ output: null, rawOutput, success: false });
         return;
       }
 
-      const text = resultText || stdout;
-      const parsed = parseReviewOutput(text);
+      const parsed = parseReviewOutput(rawOutput);
 
       if (!parsed) {
         log.error(
@@ -338,14 +357,14 @@ function spawnReviewProcess(
         "Review finished",
       );
 
-      resolve({ costUsd, output: parsed, success: !!parsed });
+      resolve({ costUsd, output: parsed, rawOutput, success: !!parsed });
     });
 
     child.on("error", (err) => {
       clearTimeout(timeout);
       activeReviewProcesses.delete(reviewId);
       log.error(err, "Failed to spawn Claude for review");
-      resolve({ output: null, success: false });
+      resolve({ output: null, rawOutput: "", success: false });
     });
   });
 }

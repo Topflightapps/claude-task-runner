@@ -1,4 +1,4 @@
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { ClickUpTask } from "./clickup/types.js";
@@ -21,6 +21,7 @@ import {
   pushAndCreatePR,
   removeRalphScaffolding,
 } from "./github/manager.js";
+import { fileLearnings, research } from "./librarian/index.js";
 import { createChildLogger } from "./logger.js";
 import { notifySlackTaskComplete } from "./notifications/slack.js";
 
@@ -91,7 +92,16 @@ export async function executeTask(
       "📋 Phase 1: Analyzing task and generating execution plan (prd.json)...",
     );
 
-    const kickoffPrompt = buildKickoffPrompt(task, branchName, attachments);
+    const learnings = await research({
+      taskDescription: `${task.name}\n${task.description}`,
+    });
+
+    const kickoffPrompt = buildKickoffPrompt(
+      task,
+      branchName,
+      attachments,
+      learnings,
+    );
     const kickoffResult = await runClaude(
       repoPath,
       kickoffPrompt,
@@ -112,6 +122,13 @@ export async function executeTask(
     emitSystemLine(runId, "Phase 1 complete — prd.json generated");
     log.info("Kickoff complete, prd.json generated");
 
+    await fileLearnings({
+      rawText: kickoffResult.output,
+      repoUrl,
+      sourceAgent: "kickoff",
+      taskId: task.id,
+    });
+
     if (cancelledRuns.has(runId)) {
       throw new Error("Task was cancelled");
     }
@@ -122,6 +139,33 @@ export async function executeTask(
       "🔄 Phase 2: Running Ralph loop to implement stories...",
     );
 
+    // Write Librarian learnings for the Ralph agent to consume
+    const ralphLearnings = await research({
+      taskDescription: `${task.name}\n${task.description}`,
+    });
+    if (ralphLearnings.length > 0) {
+      const learningsMd = [
+        "# Relevant Learnings from Librarian",
+        "",
+        "These learnings were gathered from previous tasks and may be helpful:",
+        "",
+        ...ralphLearnings.map(
+          (l) => `- **[${l.category ?? "general"}]** ${l.content}`,
+        ),
+      ].join("\n");
+      const learningsMdPath = join(
+        repoPath,
+        "scripts",
+        "ralph",
+        "learnings.md",
+      );
+      writeFileSync(learningsMdPath, learningsMd, "utf-8");
+      emitSystemLine(
+        runId,
+        `Wrote ${String(ralphLearnings.length)} librarian learning(s) to learnings.md`,
+      );
+    }
+
     emitSystemLine(
       runId,
       `Phase 2: Starting Ralph loop (max ${String(config.CLAUDE_MAX_TURNS)} iterations)...`,
@@ -131,6 +175,18 @@ export async function executeTask(
       config.CLAUDE_MAX_TURNS,
       runId,
     );
+
+    // Extract learnings from Ralph's progress output
+    const progressPath = join(repoPath, "scripts", "ralph", "progress.txt");
+    if (existsSync(progressPath)) {
+      const progressText = readFileSync(progressPath, "utf-8");
+      await fileLearnings({
+        rawText: progressText,
+        repoUrl,
+        sourceAgent: "ralph",
+        taskId: task.id,
+      });
+    }
 
     if (!ralphResult.success) {
       throw new Error(

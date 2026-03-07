@@ -1,9 +1,11 @@
 import { useEffect } from "react";
 
+import { useLearnings } from "../hooks/useLearnings.ts";
 import { useReviews } from "../hooks/useReviews.ts";
 import { useTaskRuns } from "../hooks/useTaskRuns.ts";
 import { useWebSocket } from "../hooks/useWebSocket.ts";
 import { ActiveTask } from "./ActiveTask.tsx";
+import { LearningsPanel } from "./LearningsPanel.tsx";
 import { LogViewer } from "./LogViewer.tsx";
 import { QueuePanel } from "./QueuePanel.tsx";
 import { ReposPanel } from "./ReposPanel.tsx";
@@ -33,6 +35,15 @@ export function Dashboard({
     syncing,
     toggleReviewsEnabled,
   } = useReviews(token, reviewVersion);
+
+  const {
+    learnings,
+    stats: learningStats,
+    total: learningsTotal,
+    loading: learningsLoading,
+    deleteLearning: deleteLearningItem,
+    fetchLearnings,
+  } = useLearnings(token);
 
   useEffect(() => startPolling(5000), [startPolling]);
 
@@ -78,6 +89,14 @@ export function Dashboard({
           onRetry={(id) => void retryReview(id)}
           onSync={() => void syncReviews()}
           onToggleEnabled={(enabled) => void toggleReviewsEnabled(enabled)}
+        />
+        <LearningsPanel
+          learnings={learnings}
+          stats={learningStats}
+          total={learningsTotal}
+          loading={learningsLoading}
+          onDelete={(id) => void deleteLearningItem(id)}
+          onFilter={(filters) => void fetchLearnings(filters)}
         />
         <ReposPanel token={token} />
         <TaskHistory
