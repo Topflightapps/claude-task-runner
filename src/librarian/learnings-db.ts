@@ -14,11 +14,35 @@ export interface Learning {
   updated_at: string;
 }
 
+export function deleteLearning(id: number): boolean {
+  const db = getDb();
+  const result = db.prepare(`DELETE FROM learnings WHERE id = ?`).run(id);
+  return result.changes > 0;
+}
+
 export function getLearning(id: number): Learning | undefined {
   const db = getDb();
   return db.prepare(`SELECT * FROM learnings WHERE id = ?`).get(id) as
     | Learning
     | undefined;
+}
+
+export function getLearningStats(): {
+  byCategory: { category: null | string; count: number }[];
+  bySourceAgent: { count: number; source_agent: null | string }[];
+} {
+  const db = getDb();
+  const byCategory = db
+    .prepare(
+      `SELECT category, COUNT(*) as count FROM learnings WHERE superseded_by IS NULL GROUP BY category ORDER BY count DESC`,
+    )
+    .all() as { category: null | string; count: number }[];
+  const bySourceAgent = db
+    .prepare(
+      `SELECT source_agent, COUNT(*) as count FROM learnings WHERE superseded_by IS NULL GROUP BY source_agent ORDER BY count DESC`,
+    )
+    .all() as { count: number; source_agent: null | string }[];
+  return { byCategory, bySourceAgent };
 }
 
 export function insertLearning(data: {
@@ -46,6 +70,49 @@ export function insertLearning(data: {
       data.source_task_id ?? null,
     );
   return Number(result.lastInsertRowid);
+}
+
+export function listLearnings(options?: {
+  category?: string;
+  limit?: number;
+  offset?: number;
+  project_type?: string;
+  source_agent?: string;
+}): { rows: Learning[]; total: number } {
+  const db = getDb();
+  const conditions: string[] = ["superseded_by IS NULL"];
+  const params: unknown[] = [];
+
+  if (options?.category) {
+    conditions.push("category = ?");
+    params.push(options.category);
+  }
+  if (options?.project_type) {
+    conditions.push("project_type = ?");
+    params.push(options.project_type);
+  }
+  if (options?.source_agent) {
+    conditions.push("source_agent = ?");
+    params.push(options.source_agent);
+  }
+
+  const where = `WHERE ${conditions.join(" AND ")}`;
+  const limit = options?.limit ?? 50;
+  const offset = options?.offset ?? 0;
+
+  const total = (
+    db
+      .prepare(`SELECT COUNT(*) as count FROM learnings ${where}`)
+      .get(...params) as { count: number }
+  ).count;
+
+  const rows = db
+    .prepare(
+      `SELECT * FROM learnings ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+    )
+    .all(...params, limit, offset) as Learning[];
+
+  return { rows, total };
 }
 
 export function searchLearnings(filters?: {
