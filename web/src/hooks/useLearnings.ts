@@ -15,6 +15,7 @@ export interface Learning {
 }
 
 export interface LearningStats {
+  allTags: string[];
   byCategory: { category: string | null; count: number }[];
   bySourceAgent: { count: number; source_agent: string | null }[];
 }
@@ -35,7 +36,10 @@ export function useLearnings(token: string | null) {
     async (filters?: {
       category?: string;
       project_type?: string;
+      search?: string;
+      sort?: string;
       source_agent?: string;
+      tag?: string;
     }) => {
       if (!token) return;
       setLoading(true);
@@ -46,6 +50,9 @@ export function useLearnings(token: string | null) {
           params.set("project_type", filters.project_type);
         if (filters?.source_agent)
           params.set("source_agent", filters.source_agent);
+        if (filters?.search) params.set("search", filters.search);
+        if (filters?.tag) params.set("tag", filters.tag);
+        if (filters?.sort) params.set("sort", filters.sort);
         const res = await fetch(`/api/learnings?${params.toString()}`, {
           headers: { Authorization: `Bearer ${token}` },
         });

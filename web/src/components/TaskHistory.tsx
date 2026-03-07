@@ -1,6 +1,11 @@
+import { useState } from "react";
+
 import type { TaskRun } from "../types.ts";
 
+import { Pagination } from "./Pagination.tsx";
 import { TaskRow } from "./TaskRow.tsx";
+
+const PAGE_SIZE = 10;
 
 export function TaskHistory({
   runs,
@@ -13,14 +18,27 @@ export function TaskHistory({
   onRetry: (id: number) => void;
   onClear: () => void;
 }) {
+  const [page, setPage] = useState(1);
   const historyRuns = runs.filter((r) =>
     ["done", "failed"].includes(r.status),
+  );
+  const totalPages = Math.ceil(historyRuns.length / PAGE_SIZE);
+  const paginated = historyRuns.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
   );
 
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900">
       <div className="flex items-center justify-between border-b border-gray-800 px-6 py-4">
-        <h2 className="text-lg font-semibold text-white">Task History</h2>
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg font-semibold text-white">Task History</h2>
+          {historyRuns.length > 0 && (
+            <span className="text-xs text-gray-500">
+              ({historyRuns.length})
+            </span>
+          )}
+        </div>
         {historyRuns.length > 0 && (
           <button
             onClick={onClear}
@@ -50,7 +68,7 @@ export function TaskHistory({
               </tr>
             </thead>
             <tbody>
-              {historyRuns.map((run) => (
+              {paginated.map((run) => (
                 <TaskRow
                   key={run.id}
                   run={run}
@@ -62,6 +80,11 @@ export function TaskHistory({
           </table>
         </div>
       )}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

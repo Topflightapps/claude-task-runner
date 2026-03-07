@@ -28,6 +28,7 @@ export function getLearning(id: number): Learning | undefined {
 }
 
 export function getLearningStats(): {
+  allTags: string[];
   byCategory: { category: null | string; count: number }[];
   bySourceAgent: { count: number; source_agent: null | string }[];
 } {
@@ -42,7 +43,28 @@ export function getLearningStats(): {
       `SELECT source_agent, COUNT(*) as count FROM learnings WHERE superseded_by IS NULL GROUP BY source_agent ORDER BY count DESC`,
     )
     .all() as { count: number; source_agent: null | string }[];
-  return { byCategory, bySourceAgent };
+
+  const tagRows = db
+    .prepare(
+      `SELECT tags FROM learnings WHERE superseded_by IS NULL AND tags != '[]'`,
+    )
+    .all() as { tags: string }[];
+  const tagSet = new Set<string>();
+  for (const row of tagRows) {
+    try {
+      const parsed: unknown = JSON.parse(row.tags);
+      if (Array.isArray(parsed)) {
+        for (const t of parsed) {
+          if (typeof t === "string") tagSet.add(t);
+        }
+      }
+    } catch {
+      // ignore
+    }
+  }
+  const allTags = [...tagSet].sort();
+
+  return { allTags, byCategory, bySourceAgent };
 }
 
 export function insertLearning(data: {
@@ -77,7 +99,10 @@ export function listLearnings(options?: {
   limit?: number;
   offset?: number;
   project_type?: string;
+  search?: string;
+  sort?: string;
   source_agent?: string;
+  tag?: string;
 }): { rows: Learning[]; total: number } {
   const db = getDb();
   const conditions: string[] = ["superseded_by IS NULL"];
@@ -95,10 +120,23 @@ export function listLearnings(options?: {
     conditions.push("source_agent = ?");
     params.push(options.source_agent);
   }
+  if (options?.search) {
+    conditions.push("content LIKE ?");
+    params.push(`%${options.search}%`);
+  }
+  if (options?.tag) {
+    conditions.push("tags LIKE ?");
+    params.push(`%"${options.tag}"%`);
+  }
 
   const where = `WHERE ${conditions.join(" AND ")}`;
   const limit = options?.limit ?? 50;
   const offset = options?.offset ?? 0;
+
+  let orderBy = "created_at DESC";
+  if (options?.sort === "oldest") orderBy = "created_at ASC";
+  else if (options?.sort === "category")
+    orderBy = "category ASC, created_at DESC";
 
   const total = (
     db
@@ -108,7 +146,7 @@ export function listLearnings(options?: {
 
   const rows = db
     .prepare(
-      `SELECT * FROM learnings ${where} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
+      `SELECT * FROM learnings ${where} ORDER BY ${orderBy} LIMIT ? OFFSET ?`,
     )
     .all(...params, limit, offset) as Learning[];
 

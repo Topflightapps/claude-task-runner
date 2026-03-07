@@ -1,6 +1,9 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 import type { Learning, LearningStats } from "../hooks/useLearnings.ts";
+import { Pagination } from "./Pagination.tsx";
+
+const PAGE_SIZE = 20;
 
 function formatDate(dateStr: string): string {
   return new Date(dateStr + "Z").toLocaleDateString(undefined, {
@@ -52,21 +55,111 @@ export function LearningsPanel({
   total: number;
   loading: boolean;
   onDelete: (id: number) => void;
-  onFilter: (filters?: { category?: string; source_agent?: string }) => void;
+  onFilter: (filters?: {
+    category?: string;
+    limit?: number;
+    offset?: number;
+    search?: string;
+    sort?: string;
+    source_agent?: string;
+    tag?: string;
+  }) => void;
 }) {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [activeAgent, setActiveAgent] = useState<string | null>(null);
+  const [activeTag, setActiveTag] = useState<string | null>(null);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [sortBy, setSortBy] = useState("newest");
+  const [page, setPage] = useState(1);
   const [expanded, setExpanded] = useState<Set<number>>(new Set());
   const [deleting, setDeleting] = useState<number | null>(null);
+  const [showTags, setShowTags] = useState(false);
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
+
+  const buildFilters = (overrides: {
+    category?: string | null;
+    agent?: string | null;
+    tag?: string | null;
+    search?: string;
+    sort?: string;
+    p?: number;
+  } = {}) => {
+    const cat =
+      overrides.category !== undefined ? overrides.category : activeCategory;
+    const agent =
+      overrides.agent !== undefined ? overrides.agent : activeAgent;
+    const tag = overrides.tag !== undefined ? overrides.tag : activeTag;
+    const search =
+      overrides.search !== undefined ? overrides.search : searchQuery;
+    const sort = overrides.sort !== undefined ? overrides.sort : sortBy;
+    const p = overrides.p !== undefined ? overrides.p : page;
+
+    return {
+      category: cat ?? undefined,
+      limit: PAGE_SIZE,
+      offset: (p - 1) * PAGE_SIZE,
+      source_agent: agent ?? undefined,
+      tag: tag ?? undefined,
+      search: search || undefined,
+      sort: sort === "newest" ? undefined : sort,
+    };
+  };
+
+  const applyFilters = (overrides: {
+    category?: string | null;
+    agent?: string | null;
+    tag?: string | null;
+    search?: string;
+    sort?: string;
+    p?: number;
+  } = {}) => {
+    onFilter(buildFilters(overrides));
+  };
 
   const handleFilter = (category: string | null, agent: string | null) => {
     setActiveCategory(category);
     setActiveAgent(agent);
-    onFilter({
-      category: category ?? undefined,
-      source_agent: agent ?? undefined,
-    });
+    setPage(1);
+    applyFilters({ category, agent, p: 1 });
   };
+
+  const handleTagFilter = (tag: string | null) => {
+    setActiveTag(tag);
+    setPage(1);
+    applyFilters({ tag, p: 1 });
+  };
+
+  const handleSearch = (value: string) => {
+    setSearchQuery(value);
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setPage(1);
+      applyFilters({ search: value, p: 1 });
+    }, 300);
+  };
+
+  const handleSort = (value: string) => {
+    setSortBy(value);
+    setPage(1);
+    applyFilters({ sort: value, p: 1 });
+  };
+
+  const handlePageChange = (p: number) => {
+    setPage(p);
+    applyFilters({ p });
+  };
+
+  const clearAll = () => {
+    setActiveCategory(null);
+    setActiveAgent(null);
+    setActiveTag(null);
+    setSearchQuery("");
+    setSortBy("newest");
+    setPage(1);
+    onFilter({ limit: PAGE_SIZE, offset: 0 });
+  };
+
+  const hasFilters = activeCategory || activeAgent || activeTag || searchQuery;
 
   const handleDelete = (id: number) => {
     setDeleting(id);
@@ -83,6 +176,8 @@ export function LearningsPanel({
     });
   };
 
+  const totalPages = Math.ceil(total / PAGE_SIZE);
+
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900">
       <div className="border-b border-gray-800 px-6 py-4">
@@ -95,14 +190,36 @@ export function LearningsPanel({
               {total} learning{total !== 1 ? "s" : ""} stored
             </p>
           </div>
-          {(activeCategory || activeAgent) && (
-            <button
-              onClick={() => handleFilter(null, null)}
-              className="rounded bg-gray-800 px-2.5 py-1 text-xs text-gray-400 hover:bg-gray-700"
+          <div className="flex items-center gap-2">
+            <select
+              value={sortBy}
+              onChange={(e) => handleSort(e.target.value)}
+              className="rounded bg-gray-800 px-2 py-1 text-xs text-gray-400 outline-none"
             >
-              Clear filters
-            </button>
-          )}
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="category">By category</option>
+            </select>
+            {hasFilters && (
+              <button
+                onClick={clearAll}
+                className="rounded bg-gray-800 px-2.5 py-1 text-xs text-gray-400 hover:bg-gray-700"
+              >
+                Clear filters
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Search */}
+        <div className="mt-3">
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => handleSearch(e.target.value)}
+            placeholder="Search learnings..."
+            className="w-full rounded bg-gray-800 px-3 py-1.5 text-sm text-gray-200 placeholder-gray-500 outline-none ring-1 ring-gray-700 focus:ring-gray-600"
+          />
         </div>
 
         {/* Stats bar */}
@@ -148,6 +265,39 @@ export function LearningsPanel({
               ))}
             </div>
           )}
+
+        {/* Tag filter */}
+        {stats && stats.allTags.length > 0 && (
+          <div className="mt-2">
+            <button
+              onClick={() => setShowTags(!showTags)}
+              className="text-xs text-gray-500 hover:text-gray-400"
+            >
+              {showTags
+                ? "Hide tags"
+                : `Show tags (${String(stats.allTags.length)})`}
+            </button>
+            {showTags && (
+              <div className="mt-1.5 flex flex-wrap gap-1">
+                {stats.allTags.map((tag) => (
+                  <button
+                    key={tag}
+                    onClick={() =>
+                      handleTagFilter(activeTag === tag ? null : tag)
+                    }
+                    className={`rounded px-1.5 py-0.5 text-xs transition-colors ${
+                      activeTag === tag
+                        ? "bg-gray-600 text-white ring-1 ring-white/30"
+                        : "bg-gray-800/50 text-gray-500 hover:bg-gray-800 hover:text-gray-400"
+                    }`}
+                  >
+                    {tag}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
       </div>
 
       {loading && learnings.length === 0 ? (
@@ -156,7 +306,9 @@ export function LearningsPanel({
         </p>
       ) : learnings.length === 0 ? (
         <p className="px-6 py-8 text-center text-sm text-gray-500">
-          No learnings yet. Learnings will appear here after tasks and reviews are processed.
+          {hasFilters
+            ? "No learnings match your filters."
+            : "No learnings yet. Learnings will appear here after tasks and reviews are processed."}
         </p>
       ) : (
         <div className="divide-y divide-gray-800">
@@ -207,12 +359,19 @@ export function LearningsPanel({
                         </span>
                       )}
                       {tags.map((tag) => (
-                        <span
+                        <button
                           key={tag}
-                          className="rounded bg-gray-800/50 px-1.5 py-0.5 text-xs text-gray-500"
+                          onClick={() =>
+                            handleTagFilter(activeTag === tag ? null : tag)
+                          }
+                          className={`rounded px-1.5 py-0.5 text-xs ${
+                            activeTag === tag
+                              ? "bg-gray-600 text-white"
+                              : "bg-gray-800/50 text-gray-500 hover:bg-gray-800"
+                          }`}
                         >
                           {tag}
-                        </span>
+                        </button>
                       ))}
                       <span className="text-xs text-gray-600">
                         {formatDate(learning.created_at)}
@@ -232,6 +391,11 @@ export function LearningsPanel({
           })}
         </div>
       )}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPageChange={handlePageChange}
+      />
     </div>
   );
 }

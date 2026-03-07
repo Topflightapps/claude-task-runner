@@ -1,6 +1,11 @@
+import { useState } from "react";
+
 import type { ReviewRun } from "../types.ts";
 
+import { Pagination } from "./Pagination.tsx";
 import { StatusBadge } from "./StatusBadge.tsx";
+
+const PAGE_SIZE = 10;
 
 export function ReviewsPanel({
   reviews,
@@ -23,7 +28,13 @@ export function ReviewsPanel({
   onSync: () => void;
   onToggleEnabled: (enabled: boolean) => void;
 }) {
+  const [page, setPage] = useState(1);
   const pendingCount = reviews.filter((r) => r.status === "ready").length;
+  const totalPages = Math.ceil(reviews.length / PAGE_SIZE);
+  const paginated = reviews.slice(
+    (page - 1) * PAGE_SIZE,
+    page * PAGE_SIZE,
+  );
 
   return (
     <div className="rounded-lg border border-gray-800 bg-gray-900 p-4">
@@ -43,6 +54,11 @@ export function ReviewsPanel({
           {pendingCount > 0 && (
             <span className="rounded-full bg-amber-900 px-2 py-0.5 text-xs font-medium text-amber-300">
               {pendingCount} pending
+            </span>
+          )}
+          {reviews.length > 0 && (
+            <span className="text-xs text-gray-500">
+              ({reviews.length})
             </span>
           )}
         </div>
@@ -71,7 +87,7 @@ export function ReviewsPanel({
         </p>
       ) : (
         <div className="space-y-2">
-          {reviews.map((review) => (
+          {paginated.map((review) => (
             <div
               key={review.id}
               className="flex items-center justify-between rounded border border-gray-800 bg-gray-950 px-3 py-2"
@@ -138,6 +154,11 @@ export function ReviewsPanel({
           ))}
         </div>
       )}
+      <Pagination
+        page={page}
+        totalPages={totalPages}
+        onPageChange={setPage}
+      />
     </div>
   );
 }

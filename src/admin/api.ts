@@ -76,6 +76,9 @@ export function handleAdminApi(
     const category = url.searchParams.get("category") ?? undefined;
     const project_type = url.searchParams.get("project_type") ?? undefined;
     const source_agent = url.searchParams.get("source_agent") ?? undefined;
+    const search = url.searchParams.get("search") ?? undefined;
+    const tag = url.searchParams.get("tag") ?? undefined;
+    const sort = url.searchParams.get("sort") ?? undefined;
     const limit = Number(url.searchParams.get("limit")) || 50;
     const offset = Number(url.searchParams.get("offset")) || 0;
     const result = listLearnings({
@@ -83,7 +86,10 @@ export function handleAdminApi(
       limit,
       offset,
       project_type,
+      search,
+      sort,
       source_agent,
+      tag,
     });
     json(res, 200, result);
     return;
