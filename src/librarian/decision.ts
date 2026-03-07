@@ -1,7 +1,10 @@
-import { getConfig } from "../config.js";
+import { spawn } from "node:child_process";
+
 import { createChildLogger } from "../logger.js";
 
 const log = createChildLogger("librarian:decision");
+
+const DECISION_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 
 export type Decision =
   | { existingId: number; metadata: LearningMetadata; type: "REPLACE" }
@@ -47,54 +50,14 @@ export async function decideLearning(
   newLearning: string,
   similarLearnings: SimilarLearning[],
 ): Promise<Decision> {
-  const config = getConfig();
-  const apiKey = config.ANTHROPIC_API_KEY;
-
-  if (!apiKey) {
-    log.warn("No ANTHROPIC_API_KEY — defaulting to FILE_NEW");
-    return defaultDecision();
-  }
-
   const userPrompt = `New learning:\n${newLearning}\n\nSimilar existing learnings:\n${formatSimilarLearnings(similarLearnings)}`;
+  const fullPrompt = `${SYSTEM_PROMPT}\n\n${userPrompt}`;
 
   try {
-    log.info("Running Librarian decision");
+    log.info("Running Librarian decision via claude -p");
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": apiKey,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 256,
-        system: SYSTEM_PROMPT,
-        messages: [{ role: "user", content: userPrompt }],
-      }),
-      signal: AbortSignal.timeout(30_000),
-    });
-
-    if (!response.ok) {
-      const body = await response.text();
-      log.error(
-        { status: response.status, body: body.slice(0, 500) },
-        "Anthropic API error during decision",
-      );
-      return defaultDecision();
-    }
-
-    const json = (await response.json()) as {
-      content: { text?: string; type: string }[];
-    };
-
-    const text = json.content
-      .filter((b) => b.type === "text" && b.text)
-      .map((b) => b.text)
-      .join("");
-
-    const trimmed = text.trim();
+    const output = await runClaudePrompt(fullPrompt);
+    const trimmed = output.trim();
 
     const jsonMatch = /\{[\s\S]*\}/.exec(trimmed);
     if (!jsonMatch) {
@@ -113,6 +76,55 @@ export async function decideLearning(
     log.error(error, "Failed to run Librarian decision");
     return defaultDecision();
   }
+}
+
+function runClaudePrompt(prompt: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const cleanEnv = { ...process.env };
+    delete cleanEnv.CLAUDECODE;
+    delete cleanEnv.CLAUDE_CODE_SESSION;
+
+    const child = spawn("claude", ["-p", prompt], {
+      env: cleanEnv,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    child.stdin.end();
+
+    let stdout = "";
+    let stderr = "";
+
+    child.stdout.on("data", (data: Buffer) => {
+      stdout += data.toString();
+    });
+
+    child.stderr.on("data", (data: Buffer) => {
+      stderr += data.toString();
+    });
+
+    const timer = setTimeout(() => {
+      child.kill("SIGTERM");
+      reject(new Error(`claude -p timed out after ${String(DECISION_TIMEOUT_MS / 1000)}s`));
+    }, DECISION_TIMEOUT_MS);
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        log.error(
+          { code, stderr: stderr.slice(0, 500) },
+          "claude -p exited with non-zero code",
+        );
+        reject(new Error(`claude -p exited with code ${String(code)}`));
+        return;
+      }
+      resolve(stdout);
+    });
+
+    child.on("error", (err) => {
+      clearTimeout(timer);
+      reject(err);
+    });
+  });
 }
 
 function defaultDecision(): Decision {

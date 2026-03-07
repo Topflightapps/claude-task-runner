@@ -17,7 +17,12 @@ const log = createChildLogger("librarian");
 const SIMILARITY_THRESHOLD = 0.7;
 const DEFAULT_RESEARCH_LIMIT = 5;
 
+export type EmitFn = (message: string) => void;
+
+const noop: EmitFn = () => {};
+
 export async function fileLearnings(params: {
+  emit?: EmitFn;
   projectType?: null | string;
   rawText: string;
   repoUrl?: null | string;
@@ -26,30 +31,50 @@ export async function fileLearnings(params: {
 }): Promise<void> {
   if (!getConfig().LIBRARIAN_ENABLED) return;
 
+  const emit = params.emit ?? noop;
+
   try {
+    emit(`[librarian] Extracting learnings from ${params.sourceAgent} output...`);
     const learnings = await extractLearnings(
       params.rawText,
       params.sourceAgent,
     );
 
-    for (const content of learnings) {
-      await processLearning(content, params);
+    if (learnings.length === 0) {
+      emit(`[librarian] No learnings extracted from ${params.sourceAgent}`);
+      return;
     }
+
+    emit(`[librarian] Extracted ${String(learnings.length)} learning(s), processing...`);
+
+    for (const content of learnings) {
+      await processLearning(content, params, emit);
+    }
+
+    emit(`[librarian] Done filing ${String(learnings.length)} learning(s) from ${params.sourceAgent}`);
   } catch (error) {
     log.error(error, "fileLearnings error");
+    emit(`[librarian] Error filing learnings: ${String(error)}`);
   }
 }
 
 export async function research(params: {
+  emit?: EmitFn;
   limit?: number;
   projectType?: null | string;
   taskDescription: string;
 }): Promise<Learning[]> {
   if (!getConfig().LIBRARIAN_ENABLED) return [];
 
+  const emit = params.emit ?? noop;
+
   try {
+    emit("[librarian] Researching relevant learnings...");
     const queryEmbedding = await embed(params.taskDescription);
-    if (!queryEmbedding) return [];
+    if (!queryEmbedding) {
+      emit("[librarian] Could not generate embedding for research query");
+      return [];
+    }
 
     const limit = params.limit ?? DEFAULT_RESEARCH_LIMIT;
     const results = search(queryEmbedding, limit);
@@ -72,9 +97,11 @@ export async function research(params: {
       learnings.push(learning);
     }
 
+    emit(`[librarian] Found ${String(learnings.length)} relevant learning(s)`);
     return learnings;
   } catch (error) {
     log.error(error, "research error");
+    emit(`[librarian] Research error: ${String(error)}`);
     return [];
   }
 }
@@ -82,11 +109,13 @@ export async function research(params: {
 async function processLearning(
   content: string,
   params: {
+    emit?: EmitFn;
     projectType?: null | string;
     repoUrl?: null | string;
     sourceAgent: string;
     taskId?: null | string;
   },
+  emit: EmitFn,
 ): Promise<void> {
   const embedding = await embed(content);
   if (!embedding) return;
@@ -118,6 +147,7 @@ async function processLearning(
         tags: decision.metadata.tags,
       });
       store(newId, embedding);
+      emit(`[librarian] Filed new learning #${String(newId)}: ${content.slice(0, 80)}...`);
       break;
     }
     case "REPLACE": {
@@ -132,9 +162,11 @@ async function processLearning(
       });
       store(newId, embedding);
       supersedeLearning(decision.existingId, newId);
+      emit(`[librarian] Replaced learning #${String(decision.existingId)} with #${String(newId)}`);
       break;
     }
     case "SKIP":
+      emit(`[librarian] Skipped duplicate: ${content.slice(0, 80)}...`);
       break;
     case "UPDATE": {
       updateLearning(decision.existingId, {
@@ -143,6 +175,7 @@ async function processLearning(
         tags: decision.metadata.tags as unknown as string,
       });
       store(decision.existingId, embedding);
+      emit(`[librarian] Updated learning #${String(decision.existingId)}`);
       break;
     }
   }

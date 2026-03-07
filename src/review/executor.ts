@@ -44,7 +44,9 @@ export async function executeReview(
     const review = getReviewRun(reviewId);
     const isReReview = review !== undefined && review.re_review_count > 0;
 
+    const emitLib = (msg: string) => emitReviewSystemLine(reviewId, msg);
     const learnings = await research({
+      emit: emitLib,
       taskDescription: `Code review for PR: ${prTitle} in ${repoFullName}`,
     });
 
@@ -126,6 +128,7 @@ export async function executeReview(
 
     // 6. Extract learnings from the review output
     await fileLearnings({
+      emit: emitLib,
       rawText: result.rawOutput,
       sourceAgent: "review",
     });

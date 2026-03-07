@@ -92,7 +92,9 @@ export async function executeTask(
       "📋 Phase 1: Analyzing task and generating execution plan (prd.json)...",
     );
 
+    const emitLib = (msg: string) => emitSystemLine(runId, msg);
     const learnings = await research({
+      emit: emitLib,
       taskDescription: `${task.name}\n${task.description}`,
     });
 
@@ -123,6 +125,7 @@ export async function executeTask(
     log.info("Kickoff complete, prd.json generated");
 
     await fileLearnings({
+      emit: emitLib,
       rawText: kickoffResult.output,
       repoUrl,
       sourceAgent: "kickoff",
@@ -141,6 +144,7 @@ export async function executeTask(
 
     // Write Librarian learnings for the Ralph agent to consume
     const ralphLearnings = await research({
+      emit: emitLib,
       taskDescription: `${task.name}\n${task.description}`,
     });
     if (ralphLearnings.length > 0) {
@@ -181,6 +185,7 @@ export async function executeTask(
     if (existsSync(progressPath)) {
       const progressText = readFileSync(progressPath, "utf-8");
       await fileLearnings({
+        emit: emitLib,
         rawText: progressText,
         repoUrl,
         sourceAgent: "ralph",
