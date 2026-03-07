@@ -156,7 +156,7 @@ export function LearningsPanel({
         </p>
       ) : learnings.length === 0 ? (
         <p className="px-6 py-8 text-center text-sm text-gray-500">
-          No learnings yet. Enable the Librarian to start collecting knowledge.
+          No learnings yet. Learnings will appear here after tasks and reviews are processed.
         </p>
       ) : (
         <div className="divide-y divide-gray-800">
