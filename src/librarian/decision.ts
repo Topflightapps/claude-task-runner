@@ -1,7 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 
+import { createChildLogger } from "../logger.js";
+
 const execFileAsync = promisify(execFile);
+const log = createChildLogger("librarian:decision");
 
 const DECISION_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
@@ -61,27 +64,36 @@ export async function decideLearning(
     formatSimilarLearnings(similarLearnings),
   );
 
+  const cleanEnv = { ...process.env };
+  delete cleanEnv.CLAUDECODE;
+  delete cleanEnv.CLAUDE_CODE_SESSION;
+
   try {
-    const { stdout } = await execFileAsync("claude", ["-p", prompt], {
-      env: {
-        ...process.env,
-        CLAUDE_CODE_SESSION: undefined,
-        CLAUDECODE: undefined,
-      },
+    log.info("Running Librarian decision");
+    const { stdout, stderr } = await execFileAsync("claude", ["-p", prompt], {
+      env: cleanEnv,
       timeout: DECISION_TIMEOUT_MS,
     });
+
+    if (stderr) {
+      log.warn({ stderr: stderr.slice(0, 500) }, "Claude stderr during decision");
+    }
 
     const trimmed = stdout.trim();
 
     // Extract JSON object from response
     const jsonMatch = /\{[\s\S]*\}/.exec(trimmed);
     if (!jsonMatch) {
+      log.warn({ output: trimmed.slice(0, 500) }, "No JSON object found in decision output");
       return defaultDecision();
     }
 
     const parsed: unknown = JSON.parse(jsonMatch[0]);
-    return parseDecision(parsed);
-  } catch {
+    const decision = parseDecision(parsed);
+    log.info({ type: decision.type }, "Librarian decision made");
+    return decision;
+  } catch (error) {
+    log.error(error, "Failed to run Librarian decision");
     return defaultDecision();
   }
 }
