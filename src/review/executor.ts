@@ -10,6 +10,7 @@ import {
   createPendingReview,
   fetchReviewComments,
 } from "../github/review-api.js";
+import { fileLearnings, research } from "../librarian/index.js";
 import { createChildLogger } from "../logger.js";
 import { notifySlack } from "../notifications/slack.js";
 
@@ -43,6 +44,10 @@ export async function executeReview(
     const review = getReviewRun(reviewId);
     const isReReview = review !== undefined && review.re_review_count > 0;
 
+    const learnings = await research({
+      taskDescription: `Code review for PR: ${prTitle} in ${repoFullName}`,
+    });
+
     let result;
     if (isReReview) {
       emitReviewSystemLine(reviewId, "Fetching previous review comments...");
@@ -61,10 +66,11 @@ export async function executeReview(
         baseBranch,
         reviewId,
         previousComments,
+        learnings,
       );
     } else {
       emitReviewSystemLine(reviewId, "Running Claude Code review...");
-      result = await runClaudeReview(repoPath, baseBranch, reviewId);
+      result = await runClaudeReview(repoPath, baseBranch, reviewId, learnings);
     }
 
     if (!result.success || !result.output) {
@@ -118,7 +124,13 @@ export async function executeReview(
     taskEvents.emit("review:status", { reviewId, status: "ready" });
     emitReviewSystemLine(reviewId, "Review complete — pending your approval");
 
-    // 6. Notify Slack
+    // 6. Extract learnings from the review output
+    await fileLearnings({
+      rawText: result.rawOutput,
+      sourceAgent: "review",
+    });
+
+    // 7. Notify Slack
     await notifySlack(prTitle, prUrl, comments.length);
 
     log.info(
