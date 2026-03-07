@@ -1,12 +1,7 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
-
+import { getConfig } from "../config.js";
 import { createChildLogger } from "../logger.js";
 
-const execFileAsync = promisify(execFile);
 const log = createChildLogger("librarian:decision");
-
-const DECISION_TIMEOUT_MS = 2 * 60 * 1000; // 2 minutes
 
 export type Decision =
   | { existingId: number; metadata: LearningMetadata; type: "REPLACE" }
@@ -26,7 +21,7 @@ interface SimilarLearning {
   score: number;
 }
 
-const DECISION_PROMPT = `You are a Librarian agent that manages a knowledge base of learnings. You must decide what to do with a new learning given the most similar existing learnings.
+const SYSTEM_PROMPT = `You are a Librarian agent that manages a knowledge base of learnings. You must decide what to do with a new learning given the most similar existing learnings.
 
 Possible decisions:
 - SKIP: The new learning is already covered by an existing one, or is too vague/useless to store.
@@ -46,45 +41,67 @@ For UPDATE or REPLACE, include "existingId":
 {"decision": "UPDATE", "existingId": 42, "metadata": {"category": "gotcha", "tags": ["config"], "project_type": null}}
 
 For SKIP:
-{"decision": "SKIP"}
-
-New learning:
-{NEW_LEARNING}
-
-Similar existing learnings:
-{SIMILAR_LEARNINGS}
-`;
+{"decision": "SKIP"}`;
 
 export async function decideLearning(
   newLearning: string,
   similarLearnings: SimilarLearning[],
 ): Promise<Decision> {
-  const prompt = DECISION_PROMPT.replace("{NEW_LEARNING}", newLearning).replace(
-    "{SIMILAR_LEARNINGS}",
-    formatSimilarLearnings(similarLearnings),
-  );
+  const config = getConfig();
+  const apiKey = config.ANTHROPIC_API_KEY;
 
-  const cleanEnv = { ...process.env };
-  delete cleanEnv.CLAUDECODE;
-  delete cleanEnv.CLAUDE_CODE_SESSION;
+  if (!apiKey) {
+    log.warn("No ANTHROPIC_API_KEY — defaulting to FILE_NEW");
+    return defaultDecision();
+  }
+
+  const userPrompt = `New learning:\n${newLearning}\n\nSimilar existing learnings:\n${formatSimilarLearnings(similarLearnings)}`;
 
   try {
     log.info("Running Librarian decision");
-    const { stdout, stderr } = await execFileAsync("claude", ["-p", prompt], {
-      env: cleanEnv,
-      timeout: DECISION_TIMEOUT_MS,
+
+    const response = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-api-key": apiKey,
+        "anthropic-version": "2023-06-01",
+      },
+      body: JSON.stringify({
+        model: "claude-haiku-4-5-20251001",
+        max_tokens: 256,
+        system: SYSTEM_PROMPT,
+        messages: [{ role: "user", content: userPrompt }],
+      }),
+      signal: AbortSignal.timeout(30_000),
     });
 
-    if (stderr) {
-      log.warn({ stderr: stderr.slice(0, 500) }, "Claude stderr during decision");
+    if (!response.ok) {
+      const body = await response.text();
+      log.error(
+        { status: response.status, body: body.slice(0, 500) },
+        "Anthropic API error during decision",
+      );
+      return defaultDecision();
     }
 
-    const trimmed = stdout.trim();
+    const json = (await response.json()) as {
+      content: { text?: string; type: string }[];
+    };
 
-    // Extract JSON object from response
+    const text = json.content
+      .filter((b) => b.type === "text" && b.text)
+      .map((b) => b.text)
+      .join("");
+
+    const trimmed = text.trim();
+
     const jsonMatch = /\{[\s\S]*\}/.exec(trimmed);
     if (!jsonMatch) {
-      log.warn({ output: trimmed.slice(0, 500) }, "No JSON object found in decision output");
+      log.warn(
+        { output: trimmed.slice(0, 500) },
+        "No JSON object found in decision output",
+      );
       return defaultDecision();
     }
 
