@@ -323,7 +323,8 @@ Start with a **fixed taxonomy** derived from project types the runner already se
 15. **Learning extraction prompt tuning** — iterate on quality
 
 ### Phase D: Future
-17. **Cross-repo learning transfer** — learnings from repo A help with repo B
-18. **Learning quality metrics** — track which learnings agents actually used
-19. **Librarian admin API** — CRUD endpoints for manual curation
-20. **`sqlite-vss` or Qdrant upgrade** if corpus grows beyond SQLite comfort zone
+17. **Librarian MCP tool** — expose `search_learnings` as an MCP tool so agents can query the Librarian mid-task (enables real back-and-forth instead of one-time context injection)
+18. **Cross-repo learning transfer** — learnings from repo A help with repo B
+19. **Learning quality metrics** — track which learnings agents actually used
+20. **Librarian admin API** — CRUD endpoints for manual curation
+21. **`sqlite-vss` or Qdrant upgrade** if corpus grows beyond SQLite comfort zone
