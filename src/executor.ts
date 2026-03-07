@@ -21,6 +21,7 @@ import {
   pushAndCreatePR,
   removeRalphScaffolding,
 } from "./github/manager.js";
+import { fileLearnings, research } from "./librarian/index.js";
 import { createChildLogger } from "./logger.js";
 import { notifySlackTaskComplete } from "./notifications/slack.js";
 
@@ -91,7 +92,16 @@ export async function executeTask(
       "📋 Phase 1: Analyzing task and generating execution plan (prd.json)...",
     );
 
-    const kickoffPrompt = buildKickoffPrompt(task, branchName, attachments);
+    const learnings = await research({
+      taskDescription: `${task.name}\n${task.description}`,
+    });
+
+    const kickoffPrompt = buildKickoffPrompt(
+      task,
+      branchName,
+      attachments,
+      learnings,
+    );
     const kickoffResult = await runClaude(
       repoPath,
       kickoffPrompt,
@@ -111,6 +121,13 @@ export async function executeTask(
 
     emitSystemLine(runId, "Phase 1 complete — prd.json generated");
     log.info("Kickoff complete, prd.json generated");
+
+    await fileLearnings({
+      rawText: kickoffResult.output,
+      repoUrl,
+      sourceAgent: "kickoff",
+      taskId: task.id,
+    });
 
     if (cancelledRuns.has(runId)) {
       throw new Error("Task was cancelled");

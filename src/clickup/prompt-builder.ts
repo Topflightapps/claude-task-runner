@@ -1,3 +1,4 @@
+import type { Learning } from "../librarian/learnings-db.js";
 import type { ClickUpTask } from "./types.js";
 
 export interface AttachmentPath {
@@ -98,6 +99,7 @@ export function buildKickoffPrompt(
   task: ClickUpTask,
   branchName: string,
   attachments: AttachmentPath[] = [],
+  learnings: Learning[] = [],
 ): string {
   const figmaUrls = extractFigmaUrls(task);
 
@@ -139,6 +141,17 @@ export function buildKickoffPrompt(
   const attachmentSection = formatAttachments(attachments);
   if (attachmentSection) {
     sections.push(attachmentSection);
+    sections.push("");
+  }
+
+  if (learnings.length > 0) {
+    sections.push(`## Relevant Learnings\n`);
+    sections.push(
+      `The following learnings from previous tasks may be relevant:\n`,
+    );
+    for (const learning of learnings) {
+      sections.push(`- ${learning.content}`);
+    }
     sections.push("");
   }
 
