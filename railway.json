@@ -9,6 +9,16 @@
     "healthcheckPath": "/health",
     "healthcheckTimeout": 300,
     "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 5
+    "restartPolicyMaxRetries": 5,
+    "variables": {
+      "CLAUDE_MAX_TURNS": "10",
+      "CLICKUP_REPO_FIELD_ID": "4b97a4a9-6e93-4f67-b27c-d35f7db8433b",
+      "CLICKUP_TEAM_ID": "2276882",
+      "DB_PATH": "/data/db/task-runner.db",
+      "PORT": "3000",
+      "WEBHOOK_PORT": "3000",
+      "WORK_DIR": "/data/repos",
+      "LIBRARIAN_ENABLED": "false"
+    }
   }
 }

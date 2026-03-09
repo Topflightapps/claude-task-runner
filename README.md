@@ -10,9 +10,33 @@ Currently supports Next.js projects. Designed to run on Railway, a Linux VPS, or
 
 ---
 
+## Quick Start
+
+[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PmV0za?referralCode=r_IbaC&utm_medium=integration&utm_source=template&utm_campaign=generic)
+
+1. **Click the Railway button above.** The first deploy will fail — that's expected. Note the URL it deploys to (e.g., `https://your-app.up.railway.app`).
+2. **Clone this repo and install dependencies:**
+   ```bash
+   git clone https://github.com/Topflightapps/claude-task-runner.git
+   cd claude-task-runner
+   pnpm install
+   ```
+3. **Get your ClickUp API token:** Go to [ClickUp Settings → ClickUp API](https://app.clickup.com/2276882/settings/team/2276882/clickup-api) (or navigate to **Settings → Integrations & ClickApps → ClickUp API**). Copy your personal API token (`pk_...`).
+4. **Run the setup script:**
+   ```bash
+   pnpm run setup
+   ```
+   It will ask for your ClickUp API token and your Railway deployment URL, then generate a `.env` file with all the variables you need.
+5. **Paste the `.env` variables into Railway.** Go to your Railway service → **Variables**, and add each variable from the generated `.env` file.
+6. **Railway should now deploy successfully.**
+
+After deployment, you'll need to [authenticate Claude](#claude-authentication) and [add a volume](#adding-a-volume) if the template didn't create one automatically.
+
+---
+
 ## Table of Contents
 
-- [Deploy to Railway (Recommended)](#deploy-to-railway-recommended)
+- [Quick Start](#quick-start)
 - [Environment Variables](#environment-variables)
 - [ClickUp Setup](#clickup-setup)
 - [Claude Authentication](#claude-authentication)
@@ -35,11 +59,7 @@ Currently supports Next.js projects. Designed to run on Railway, a Linux VPS, or
 
 ---
 
-## Deploy to Railway (Recommended)
-
-The fastest way to get started is a one-click deploy to Railway:
-
-[![Deploy on Railway](https://railway.com/button.svg)](https://railway.com/deploy/PmV0za?referralCode=r_IbaC&utm_medium=integration&utm_source=template&utm_campaign=generic)
+## Railway Details
 
 ### What you get
 
@@ -48,19 +68,9 @@ The fastest way to get started is a one-click deploy to Railway:
 - Auto-restart on failure with health checks
 - Public URL for ClickUp/GitHub webhooks
 
-### Step-by-step Railway setup
-
-1. **Click the deploy button** above and connect your GitHub account
-2. **Fill in the environment variables** (see [Environment Variables](#environment-variables) below)
-3. **Wait for the build** — first deploy takes ~5 minutes due to Playwright/Chromium install
-4. **Add a volume** — In Railway, go to your service → Settings → Volumes → Mount a volume at `/data`. This persists your database, cloned repos, and Claude auth tokens across deploys.
-5. **Get your public URL** — Go to Settings → Networking → Generate Domain. This is your webhook URL.
-6. **Register your ClickUp webhook** — Point it to `https://your-app.up.railway.app/webhook` (see [ClickUp Setup](#clickup-setup))
-7. **Authenticate Claude** (if using Claude Max/Pro instead of API key) — see [Claude Authentication](#claude-authentication)
-
 ### Adding a volume
 
-Railway volumes persist data across redeploys. You **must** attach one. Template should include this already, but if you need to attach one manually:
+Railway volumes persist data across redeploys. You **must** attach one. The template should include this already, but if you need to attach one manually:
 
 1. Open your service in the Railway dashboard
 2. Go to **Settings → Volumes**
@@ -227,65 +237,20 @@ If you have a Claude Max or Pro subscription and want to use `claude login` inst
 - **Claude Code CLI**: `npm install -g @anthropic-ai/claude-code`
 - Claude Code authenticated via `claude login` or `ANTHROPIC_API_KEY` env var
 
-### Quick Start
+### Setup
+
+Follow the [Quick Start](#quick-start) steps above to clone, install, and run the setup script. Then:
 
 ```bash
-# Clone and install
-git clone https://github.com/Topflightapps/claude-task-runner.git
-cd claude-task-runner
-pnpm install
-
-# Run the interactive setup to generate your .env file
-pnpm run setup
-
-# Start the runner (dev mode with hot reload)
+# Dev mode with hot reload
 pnpm dev
-```
 
-### Getting Your ClickUp API Token
-
-The setup script will prompt for your ClickUp API token. To get one:
-
-1. Go to [ClickUp Settings → ClickUp API](https://app.clickup.com/2276882/settings/team/2276882/clickup-api)
-   - Or navigate manually: **Settings** → **Integrations & ClickApps** → **ClickUp API**
-2. Your personal API token (`pk_...`) is displayed at the top of the page — click **Copy**
-3. If you need a fresh token, click **Regenerate**
-
-![ClickUp API Token page](docs/images/clickup-api-token.png)
-
-### Setup Script
-
-The interactive setup script walks you through generating a `.env` file:
-
-```bash
-pnpm run setup
-```
-
-NOTE: ^ `pnpm setup` will run pnpm's setup script, not ours. Use `pnpm run setup`.
-
-It will:
-
-1. Prompt for your **ClickUp API token**
-2. Fetch your ClickUp teams and let you pick one
-3. List team members so you can select the "Claude" user
-4. Scan your ClickUp spaces for custom fields and auto-detect the "GitHub Repo" field
-5. Generate a **webhook secret** and optionally register the webhook with ClickUp
-6. Prompt for your **GitHub token** and **Anthropic API key**
-7. Optionally collect a **Figma MCP token**
-8. Write everything to a `.env` file
-
-### Development (hot reload)
-
-```bash
-pnpm dev
-```
-
-### Production
-
-```bash
+# Or production
 pnpm build
 pnpm start
 ```
+
+> **Note:** Use `pnpm run setup`, not `pnpm setup` (the latter runs pnpm's own setup command).
 
 ---
 
