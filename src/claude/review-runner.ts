@@ -52,11 +52,20 @@ export async function runClaudeReReview(
     "\n\n" +
     "For each previous comment, check whether the concern was addressed in the new code. " +
     "Also look for any NEW issues introduced by the fixes.\n\n" +
-    'CRITICAL: The "line" in each comment MUST be a line number that appears in the diff output. ' +
+    'CRITICAL: The "line" in each comment MUST be the correct line number in the NEW version of the file, ' +
+    "and it must be a line that appears in the diff hunks. " +
     "GitHub's review API only accepts comments on lines that are part of the diff hunks " +
     "(added/removed/modified lines and their surrounding context lines shown in the diff). " +
-    "Use the line numbers from the RIGHT side of the diff (the new file version). " +
     "If you want to comment on code that is NOT in the diff, include it in the summary instead.\n\n" +
+    "HOW TO GET CORRECT LINE NUMBERS:\n" +
+    "1. Run `git diff origin/" +
+    prBaseBranch +
+    "...HEAD` to identify changed files and what changed.\n" +
+    "2. For each file you want to comment on, run `cat -n <file>` to see the file with exact line numbers.\n" +
+    "3. Use the line numbers from `cat -n` output for your comments — these are the real file line numbers.\n" +
+    "4. Do NOT try to calculate line numbers by counting lines in the diff output — this is error-prone.\n" +
+    "5. Verify each line number is within a diff hunk by cross-referencing with the @@ headers " +
+    "(e.g., `@@ -0,0 +17,50 @@` means lines 17-66 of the new file are in the diff).\n\n" +
     "Provide a code review as ONLY valid JSON (no markdown, no code fences):\n" +
     "{\n" +
     '  "summary": "Brief assessment — which previous concerns were addressed, which remain, any new issues",\n' +
@@ -110,11 +119,20 @@ export async function runClaudeReview(
     prBaseBranch +
     "...HEAD` to see what changed. " +
     "Read the relevant source files for context.\n\n" +
-    'CRITICAL: The "line" in each comment MUST be a line number that appears in the diff output. ' +
+    'CRITICAL: The "line" in each comment MUST be the correct line number in the NEW version of the file, ' +
+    "and it must be a line that appears in the diff hunks. " +
     "GitHub's review API only accepts comments on lines that are part of the diff hunks " +
     "(added/removed/modified lines and their surrounding context lines shown in the diff). " +
-    "Use the line numbers from the RIGHT side of the diff (the new file version). " +
     "If you want to comment on code that is NOT in the diff, include it in the summary instead.\n\n" +
+    "HOW TO GET CORRECT LINE NUMBERS:\n" +
+    "1. Run `git diff origin/" +
+    prBaseBranch +
+    "...HEAD` to identify changed files and what changed.\n" +
+    "2. For each file you want to comment on, run `cat -n <file>` to see the file with exact line numbers.\n" +
+    "3. Use the line numbers from `cat -n` output for your comments — these are the real file line numbers.\n" +
+    "4. Do NOT try to calculate line numbers by counting lines in the diff output — this is error-prone.\n" +
+    "5. Verify each line number is within a diff hunk by cross-referencing with the @@ headers " +
+    "(e.g., `@@ -0,0 +17,50 @@` means lines 17-66 of the new file are in the diff).\n\n" +
     "Provide a code review as ONLY valid JSON (no markdown, no code fences):\n" +
     "{\n" +
     '  "summary": "Brief overall assessment of the PR",\n' +
