@@ -242,6 +242,17 @@ pnpm run setup
 pnpm dev
 ```
 
+### Getting Your ClickUp API Token
+
+The setup script will prompt for your ClickUp API token. To get one:
+
+1. Go to [ClickUp Settings → ClickUp API](https://app.clickup.com/2276882/settings/team/2276882/clickup-api)
+   - Or navigate manually: **Settings** → **Integrations & ClickApps** → **ClickUp API**
+2. Your personal API token (`pk_...`) is displayed at the top of the page — click **Copy**
+3. If you need a fresh token, click **Regenerate**
+
+![ClickUp API Token page](docs/images/clickup-api-token.png)
+
 ### Setup Script
 
 The interactive setup script walks you through generating a `.env` file:
