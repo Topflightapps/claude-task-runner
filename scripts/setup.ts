@@ -171,7 +171,9 @@ async function main() {
           method: "POST",
         },
       );
-      console.log(`✅ Webhook registered! ID: ${webhook.id || webhook.webhook?.id}`);
+      console.log(
+        `✅ Webhook registered! ID: ${webhook.id || webhook.webhook?.id}`,
+      );
     } catch (err) {
       console.error(
         "⚠️ Failed to register webhook. You can register it manually later.",
@@ -180,9 +182,17 @@ async function main() {
     }
   }
 
-  // GitHub and Anthropic tokens
+  // GitHub
   const githubToken = await ask("\nEnter your GitHub token (ghp_...): ");
   env.GITHUB_TOKEN = githubToken;
+
+  const githubUsername = await ask("Enter your GitHub username: ");
+  env.GITHUB_USERNAME = githubUsername;
+
+  const githubPrAssignee = await ask(
+    `GitHub username to auto-assign PRs to (default: ${githubUsername}): `,
+  );
+  env.GITHUB_PR_ASSIGNEE = githubPrAssignee || githubUsername;
 
   // Optional: Figma
   const figmaToken = await ask(
